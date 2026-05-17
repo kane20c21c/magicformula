@@ -1,0 +1,18 @@
+# 캐시 / 데이터
+src/cache/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# 환경
+.env
+*.yaml
+!docs/
