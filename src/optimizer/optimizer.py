@@ -1,20 +1,19 @@
 """
 optimizer/optimizer.py
 ----------------------
-51개 가중치 조합 × 3개 진입 규칙(R1·R2·R3) × 57종목 = 8,721회 백테스트를 실행하고
+8개 가중치 조합 × 3개 진입 규칙(R1·R3·ADAPTIVE) = 24회 백테스트를 실행하고
 결과를 집계한다.
 
-가중치 조합 구조 (설계 v2 Section 9)
--------------------------------------
-Basic : {trend:0.20, momentum:0.25, volume:0.30, volatility:0.10, wyckoff:0.15}
-Low   : Basic - 0.03  /  High : Basic + 0.03
+ADAPTIVE 규칙: 진입 신호 당일 직전 40거래일 점수 패턴으로 종목별 규칙(R1/R3/SKIP)을
+               동적으로 결정 (rolling 분류 — 정적 워밍업 분류 대체).
 
-패턴 1 — 전 영역 Basic (1개)
-패턴 2 — LL×1 + HL×1 + BL×3  →  C(5,1)×C(4,1) = 20개
-패턴 3 — LL×2 + HL×2 + BL×1  →  C(5,2)×C(3,2) = 30개
-합계: 51개
-
-LL/HL 동수 → 가중치 합 자동 100% (정규화 불필요)
+가중치 조합 구조 (설계 v3 — 규칙별 최적화)
+-------------------------------------------
+R1 최적화 조합 (combination11~14): Volume↑, Wyckoff↓
+  - 임계 돌파형 종목에서 거래량 확인 강화, 와이코프 가중치 축소
+R3 최적화 조합 (combination21~24): Trend↑, Volume↓
+  - 계단형 추세 종목에서 추세 강도 강화, 거래량 가중치 축소
+각 그룹은 기준→1단계→2단계 순으로 해당 방향 변화, 역방향은 반대 조정.
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ try:
 except Exception:
     TICKER_LIST = sorted(k for k in TICKERS.keys() if k not in _EXCLUDE_TICKERS)
 from scoring.scorer import BASIC_WEIGHTS, compute_scores
-from simulator.simulator import run_simulation, trades_to_df
+from simulator.simulator import run_simulation, simulate_ticker, trades_to_df
 from metrics.metrics import compute_metrics
 
 # ---------------------------------------------------------------------------
@@ -70,81 +69,55 @@ from metrics.metrics import compute_metrics
 
 AREAS = ("trend", "momentum", "volume", "volatility", "wyckoff")
 
-BASIC_W: dict[str, float] = {
-    "trend":      0.20,
-    "momentum":   0.25,
-    "volume":     0.30,
-    "volatility": 0.10,
-    "wyckoff":    0.15,
-}
-
-assert abs(sum(BASIC_W.values()) - 1.0) < 1e-9, f"BASIC_W 합계 오류: {sum(BASIC_W.values())}"
-
-DELTA = 0.03   # Low = Basic - 0.03 / High = Basic + 0.03
-
 
 # ---------------------------------------------------------------------------
-# 51개 조합 생성
+# 8개 가중치 조합 (v3 — 규칙별 최적화)
 # ---------------------------------------------------------------------------
 
-def _make_weights(low_areas: tuple, high_areas: tuple) -> dict[str, float]:
-    """
-    특정 영역에 Low/High를 적용한 가중치 dict를 반환한다.
-    나머지 영역은 Basic을 유지.
-    """
-    w = dict(BASIC_W)
-    for a in low_areas:
-        w[a] = round(BASIC_W[a] - DELTA, 10)
-    for a in high_areas:
-        w[a] = round(BASIC_W[a] + DELTA, 10)
-    return w
+# 조합 코드 형식: T-M-V-P-W (각 영역 가중치 %, 합계 100)
+# R1 최적화: Volume↑ Wyckoff↓ (분석 결과: R1 수익률 ∝ V+, W-)
+# R3 최적화: Trend↑ Volume↓  (분석 결과: R3 수익률 ∝ T+, V-)
 
+_COMBO_SPECS = [
+    # label         T      M      V      P      W
+    ("C11_R1_base", 0.20,  0.22,  0.33,  0.13,  0.12),  # R1 기준
+    ("C12_R1_st1",  0.20,  0.20,  0.35,  0.15,  0.10),  # R1 1단계 (V↑↑ W↓↓)
+    ("C13_R1_st2",  0.20,  0.18,  0.37,  0.17,  0.08),  # R1 2단계 (V↑↑↑ W↓↓↓)
+    ("C14_R1_rev",  0.20,  0.24,  0.31,  0.11,  0.14),  # R1 역방향 (V↓ W↑)
+    ("C21_R3_base", 0.23,  0.22,  0.27,  0.13,  0.15),  # R3 기준
+    ("C22_R3_st1",  0.25,  0.20,  0.25,  0.15,  0.15),  # R3 1단계 (T↑↑ V↓↓)
+    ("C23_R3_st2",  0.27,  0.18,  0.23,  0.17,  0.15),  # R3 2단계 (T↑↑↑ V↓↓↓)
+    ("C24_R3_rev",  0.21,  0.24,  0.29,  0.11,  0.15),  # R3 역방향 (T↓ V↑)
+]
 
-def _make_label(low_areas: tuple, high_areas: tuple) -> str:
-    """조합의 사람이 읽기 쉬운 레이블."""
-    if not low_areas and not high_areas:
-        return "Basic"
-    parts = [f"LL_{a}" for a in low_areas] + [f"HL_{a}" for a in high_areas]
-    return "__".join(parts)
+# 가중치 합 검증
+for _spec in _COMBO_SPECS:
+    _total = sum(_spec[1:])
+    assert abs(_total - 1.0) < 1e-9, f"{_spec[0]} 가중치 합 오류: {_total}"
 
 
 def generate_weight_combinations() -> list[dict]:
     """
-    51개 가중치 조합 목록을 반환한다.
+    8개 가중치 조합 목록을 반환한다 (v3 — 규칙별 최적화 설계).
 
     Returns
     -------
     list of dict with keys:
-        label    : 조합 레이블
+        label    : 조합 레이블 (C11_R1_base 등)
         weights  : {area: weight}
     """
     combos = []
-
-    # 패턴 1: 전 영역 Basic (1개)
-    combos.append({
-        "label":   "Basic",
-        "weights": dict(BASIC_W),
-    })
-
-    # 패턴 2: LL×1 + HL×1 + BL×3 (20개)
-    for ll_area in AREAS:
-        remaining = [a for a in AREAS if a != ll_area]
-        for hl_area in remaining:
-            combos.append({
-                "label":   _make_label((ll_area,), (hl_area,)),
-                "weights": _make_weights((ll_area,), (hl_area,)),
-            })
-
-    # 패턴 3: LL×2 + HL×2 + BL×1 (30개)
-    for ll_pair in itertools.combinations(AREAS, 2):
-        remaining = [a for a in AREAS if a not in ll_pair]
-        for hl_pair in itertools.combinations(remaining, 2):
-            combos.append({
-                "label":   _make_label(ll_pair, hl_pair),
-                "weights": _make_weights(ll_pair, hl_pair),
-            })
-
-    assert len(combos) == 51, f"조합 수 오류: {len(combos)} (기대값: 51)"
+    for label, t, m, v, p, w in _COMBO_SPECS:
+        combos.append({
+            "label": label,
+            "weights": {
+                "trend":      t,
+                "momentum":   m,
+                "volume":     v,
+                "volatility": p,
+                "wyckoff":    w,
+            },
+        })
     return combos
 
 
@@ -152,7 +125,7 @@ def generate_weight_combinations() -> list[dict]:
 # 전체 백테스트 실행기
 # ---------------------------------------------------------------------------
 
-RULES = ("R1", "R2", "R3")
+RULES = ("R1", "R3", "ADAPTIVE")   # R2 제거 (R1과 실질 동일)
 
 
 def run_all(
@@ -162,7 +135,7 @@ def run_all(
     verbose:        bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    51조합 × 3규칙 전체 백테스트를 실행한다.
+    51조합 × 4규칙(R1·R2·R3·ADAPTIVE) 전체 백테스트를 실행한다.
 
     Parameters
     ----------
@@ -225,64 +198,12 @@ def run_all(
                 print(f"[{run_count:3d}/{total_runs}] {label} / {rule}", end=" ... ", flush=True)
 
             try:
-                # ── ADAPTIVE 모드 ──────────────────────────────────────────
-                if rule == "ADAPTIVE":
-                    # 워밍업 구간(trade_start 이전) 종합 점수 추출
-                    warmup_scores: dict[str, pd.Series] = {}
-                    for ticker, df in scored_data.items():
-                        warmup = df.loc[df.index < trade_start, "composite_score"]
-                        if not warmup.empty:
-                            warmup_scores[ticker] = warmup
-
-                    # 종목별 규칙 자동 분류
-                    rule_df = select_rules_for_backtest(warmup_scores)
-                    assigned: dict[str, str] = dict(
-                        zip(rule_df["ticker"], rule_df["rule"])
-                    )
-                    reasons: dict[str, str] = dict(
-                        zip(rule_df["ticker"], rule_df["reason"])
-                    )
-
-                    if verbose:
-                        print()  # 줄 바꿈
-                        for ticker in sorted(assigned):
-                            r = assigned[ticker]
-                            print(f"  [ADAPTIVE] {ticker} → {r}  ({reasons[ticker]})")
-
-                    # 규칙별로 서브셋 시뮬레이션 후 결합
-                    all_adp_trades: list = []
-                    equity_frames:  list = []
-                    for sub_rule in ("R1", "R2", "R3"):
-                        sub_scored = {
-                            t: scored_data[t]
-                            for t, r in assigned.items()
-                            if r == sub_rule and t in scored_data
-                        }
-                        if not sub_scored:
-                            continue
-                        sub_trades, sub_equity = run_simulation(
-                            sub_scored, sub_rule, trade_start, trade_end
-                        )
-                        all_adp_trades.extend(sub_trades)
-                        equity_frames.append(sub_equity)
-
-                    # 에쿼티 통합
-                    if equity_frames:
-                        combined_equity = pd.concat(equity_frames, axis=1)
-                        combined_equity["total"] = combined_equity.drop(
-                            columns=["total"], errors="ignore"
-                        ).sum(axis=1)
-                    else:
-                        combined_equity = pd.DataFrame()
-
-                    trades_list = all_adp_trades
-                    equity_df   = combined_equity
-
-                # ── 일반 규칙 (R1 / R2 / R3) ─────────────────────────────
-                else:
-                    trades_list, equity_df = run_simulation(
-                        scored_data, rule, trade_start, trade_end
-                    )
+                # ── 모든 규칙 (R1 / R3 / ADAPTIVE) ──────────────────────
+                # ADAPTIVE 는 simulate_ticker() 내부에서 진입 신호 당일
+                # 직전 40거래일 점수로 rolling 동적 분류 수행 (look-ahead bias 없음)
+                trades_list, equity_df = run_simulation(
+                    scored_data, rule, trade_start, trade_end
+                )
 
                 tdf = trades_to_df(trades_list)
                 metrics = compute_metrics(tdf, equity_df, kospi_df, trade_start, trade_end)

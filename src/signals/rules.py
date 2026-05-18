@@ -1,7 +1,7 @@
 """
 signals/rules.py
 ----------------
-3가지 진입 규칙(R1·R2·R3)과 4가지 청산 규칙(C1~C4)을 정의한다.
+3가지 진입 규칙(R1·R2·R3)과 3가지 청산 규칙(C1·C_WY·C3)을 정의한다.
 
 진입 규칙
 ---------
@@ -14,10 +14,16 @@ R3 : composite_score 가 음수→양수 부호 전환 AND ADX(14) > 20
 
 청산 규칙 (simulator 에서 호출)
 ---------
-C1 : 종가 < 손절가(진입가 - ATR×1) → 다음날 시가 전량 청산
-C2 : 분할 익절 (ATR×1 / ATR×2 / ATR×3) → 30% / 40% / 30%
-C3 : composite_score ≤ -3 → 다음날 시가 잔량 전량 청산
-C4 : 보유 20거래일 + 누적손익 ≤ 0% → 다음날 시가 잔량 전량 청산
+C1   : 종가 < 손절가(진입가 - ATR×1)          → 다음날 시가 전량 청산 (손절)
+C_WY : 와이코프 추세 전환 신호 (v3 신규)       → 다음날 시가 전량 청산 (익절/추세종료)
+         - 신호1: composite_score 가 N일(기본 3) 연속 음수 전환
+         - 신호2: 진입 점수 대비 Δ(기본 4.0) 이상 하락 + 현재 점수 음수
+C3   : composite_score ≤ -3                   → 다음날 시가 잔량 전량 청산 (급락 안전망)
+
+변경 이력
+---------
+v3 : C2(ATR 분할 익절) 제거 → C_WY(와이코프 점수 반전) 로 대체.
+     단순 목표가 도달 매도 → 추세 전환 신호 발생 시 매도로 전환.
 """
 
 from __future__ import annotations
@@ -165,79 +171,65 @@ def entry_signals(
 # 청산 조건 평가 (포지션 단위로 호출)
 # ---------------------------------------------------------------------------
 
-# 분할 익절 비율
-PARTIAL_RATIOS = (0.30, 0.40, 0.30)   # C2-1 / C2-2 / C2-3
-
 # ATR 배수
-ATR_STOP  = 1.0   # C1 손절
-ATR_T1    = 1.0   # C2-1 1차 익절
-ATR_T2    = 2.0   # C2-2 2차 익절
-ATR_T3    = 3.0   # C2-3 3차 익절
+ATR_STOP = 1.0   # C1 손절 (진입가 - ATR×1)
 
-# C3 점수 임계
+# C_WY (와이코프 추세 전환) 파라미터
+WY_CONSEC_NEG_DAYS: int   = 3    # 연속 음전환 일수 임계
+WY_SCORE_DROP:      float = 4.0  # 진입 점수 대비 낙폭 임계
+
+# C3 점수 임계 (급락 안전망)
 SCORE_EXIT_THRESHOLD = -3.0
 
-# C4 보유 기간 임계
-MAX_HOLD_DAYS = 20
-
-
-def compute_exit_prices(entry_price: float, atr: float) -> dict:
-    """
-    진입가 + ATR을 기반으로 손절가 / 3단계 익절가를 반환한다.
-
-    Returns
-    -------
-    dict with keys: stop_loss, target1, target2, target3
-    """
-    return {
-        "stop_loss": entry_price - ATR_STOP * atr,
-        "target1":   entry_price + ATR_T1 * atr,
-        "target2":   entry_price + ATR_T2 * atr,
-        "target3":   entry_price + ATR_T3 * atr,
-    }
+def compute_stop_loss(entry_price: float, atr: float) -> float:
+    """C1 손절가 계산 (진입가 - ATR×1)."""
+    return entry_price - ATR_STOP * atr
 
 
 def check_c1(close: float, stop_loss: float) -> bool:
-    """C1: 종가 < 손절가 → True이면 다음날 시가 청산."""
+    """C1: 종가 < 손절가 → True이면 다음날 시가 전량 청산."""
     return close < stop_loss
 
 
-def check_c2(
-    high: float,
-    targets: list[float],
-    partial_done: list[bool],
-) -> list[int]:
+def check_wyckoff_exit(
+    current_score:    float,
+    entry_score:      float,
+    consec_neg_days:  int,
+    min_consec:       int   = WY_CONSEC_NEG_DAYS,
+    max_drop:         float = WY_SCORE_DROP,
+) -> bool:
     """
-    C2: 분할 익절 — 당일 고가가 각 익절 목표를 초과한 미완료 단계를 반환.
+    C_WY: 와이코프 추세 전환 신호 판단.
+
+    두 가지 조건 중 하나라도 충족하면 True → 다음날 시가 전량 청산.
+
+    신호1 — 연속 음전환
+        보유 기간 중 composite_score 가 min_consec 일 연속 0 미만.
+        추세 종료 / 계단형 하락의 전형적 패턴.
+
+    신호2 — 진입 대비 score 급락
+        entry_score - current_score ≥ max_drop  AND  current_score < 0.
+        진입 시점 대비 강도가 크게 떨어지고 이미 음수권 → 분배 국면 진입 가능성.
 
     Parameters
     ----------
-    high         : 당일 고가
-    targets      : [target1, target2, target3]
-    partial_done : [done_1, done_2, done_3]
-
-    Returns
-    -------
-    list of stage indices (0-based) that are newly triggered
+    current_score   : 당일 composite_score
+    entry_score     : 진입 당일 composite_score (Position 에 저장)
+    consec_neg_days : 보유 기간 중 연속 음수 일수 카운터 (Position 에서 갱신)
+    min_consec      : 신호1 임계 (기본 WY_CONSEC_NEG_DAYS = 3)
+    max_drop        : 신호2 score 낙폭 임계 (기본 WY_SCORE_DROP = 4.0)
     """
-    triggered = []
-    for i, (tgt, done) in enumerate(zip(targets, partial_done)):
-        if not done and high >= tgt:
-            triggered.append(i)
-    return triggered
+    # 신호1: N일 연속 음수 전환
+    if consec_neg_days >= min_consec:
+        return True
+    # 신호2: 진입 대비 score 급락 + 현재 음수
+    if (entry_score - current_score >= max_drop) and (current_score < 0):
+        return True
+    return False
 
 
 def check_c3(score: float) -> bool:
-    """C3: 종합 점수 ≤ -3 → True이면 다음날 시가 잔량 청산."""
+    """C3: 종합 점수 ≤ -3 → True이면 다음날 시가 잔량 전량 청산 (급락 안전망)."""
     return score <= SCORE_EXIT_THRESHOLD
 
 
-def check_c4(
-    days_held: int,
-    unrealized_pnl_pct: float,
-) -> bool:
-    """
-    C4: 보유 20거래일 + 누적손익 ≤ 0% → True이면 다음날 시가 청산.
-    누적손익 > 0%이면 유지 (추세 추종).
-    """
-    return days_held >= MAX_HOLD_DAYS and unrealized_pnl_pct <= 0.0

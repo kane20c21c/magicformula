@@ -50,7 +50,8 @@ class RuleSelectionConfig:
     """규칙 선택 알고리즘 설정값."""
 
     lookback_days: int = 60
-    """분류에 사용할 최근 거래일 수. 기본 60일."""
+    """분류에 사용할 최근 거래일 수. 기본 60일 (≈ 3개월).
+    v4: 40 → 60. 더 긴 패턴 인식 창으로 분류 안정성 향상."""
 
     min_data_ratio: float = 0.5
     """lookback 기간 중 최소 데이터 보유 비율. 미달 시 SKIP."""
@@ -58,14 +59,17 @@ class RuleSelectionConfig:
     score_threshold: float = 5.0
     """진입 점수 임계값 (백테스트의 +5와 동일하게)."""
 
-    avg_score_min_skip: float = 0.0
-    """이 값 미만의 평균 점수는 SKIP (약세 종목 회피)."""
+    avg_score_min_skip: float = -2.0
+    """이 값 미만의 평균 점수는 SKIP (약세 종목 회피).
+    v2: 0.0 → -2.0 (평균 점수가 약간 음수인 종목도 진입 허용, 단 -2 미만은 회피)."""
 
-    above_threshold_ratio_r2: float = 0.50
-    """이 비율 이상으로 점수가 임계값 위에 머무르면 R2."""
+    above_threshold_ratio_r2: float = 0.20
+    """이 비율 이상으로 점수가 임계값 위에 머무르면 R2 (직진 폭등형).
+    v2: 0.50 → 0.20 (실제 데이터 기준 현실화)."""
 
-    above_threshold_ratio_r1: float = 0.20
-    """이 비율 이상으로 점수가 임계값 위에 머무르면 R1."""
+    above_threshold_ratio_r1: float = 0.08
+    """이 비율 이상으로 점수가 임계값 위에 머무르면 R1 (임계 돌파형).
+    v2: 0.20 → 0.08 (R3 앞에서 먼저 체크하므로 낮게 설정)."""
 
     sign_change_min_r3: int = 6
     """R3 분류를 위한 부호 전환 최소 횟수."""
@@ -181,14 +185,19 @@ class AdaptiveRuleSelector:
 
         결정 트리는 위에서 아래로 평가되며, 처음 매칭되는 규칙이 선택됨.
 
-        Decision Tree
-        -------------
+        Decision Tree (v3 — avg_score_min_skip 완화)
+        --------------------------------
         1. 데이터 부족              → SKIP
-        2. 평균 점수 < 0            → SKIP (약세 회피)
-        3. 임계값 위 비율 ≥ 50%      → R2 (직진 폭등형)
-        4. 부호 전환 ≥ 6 + 평균>0    → R3 (계단형 추세)
-        5. 임계값 위 비율 ≥ 20%      → R1 (임계 돌파형)
+        2. 평균 점수 < -2.0         → SKIP (약세 회피, v3: 0→-2 완화)
+        3. 임계값 위 비율 ≥ 20%      → R2 (직진 폭등형)
+        4. 임계값 위 비율 ≥ 8%       → R1 (임계 돌파형)  ← R3 앞으로 이동
+        5. 부호 전환 ≥ 6 + 평균>0    → R3 (계단형 추세)
         6. 그 외                    → SKIP (패턴 모호)
+
+        변경 이유 (v1 → v2):
+        - v1에서 R3가 R1 앞에 있어 모든 avg>0 종목이 R3로 흡수됨
+        - R1(임계 돌파형)을 R3 앞에 배치해 threshold 돌파 패턴 우선 분류
+        - R2 임계(0.50→0.20), R1 임계(0.20→0.08) 현실 데이터 기준으로 낮춤
         """
         cfg = self.config
         metrics = self.compute_metrics(scores)
@@ -217,7 +226,7 @@ class AdaptiveRuleSelector:
                 reason=f"평균 점수 {avg:+.2f} < 0 (약세/횡보 종목, 진입 보류)",
             )
 
-        # Rule 3: R2 (직진 폭등형)
+        # Rule 3: R2 (직진 폭등형) — 임계값 위에 자주 머묾
         if above_ratio >= cfg.above_threshold_ratio_r2:
             return RuleSelectionResult(
                 ticker=ticker,
@@ -228,17 +237,7 @@ class AdaptiveRuleSelector:
                        f"≥ {cfg.above_threshold_ratio_r2:.0%} (직진 폭등형)",
             )
 
-        # Rule 4: R3 (계단형 추세)
-        if sign_chg >= cfg.sign_change_min_r3 and avg > 0:
-            return RuleSelectionResult(
-                ticker=ticker,
-                selected_rule="R3",
-                confidence=0.80,
-                metrics=metrics,
-                reason=f"부호 전환 {sign_chg}회 + 평균 {avg:+.2f} > 0 (계단형 추세)",
-            )
-
-        # Rule 5: R1 (임계 돌파형)
+        # Rule 4: R1 (임계 돌파형) — R3 앞에서 체크 (v2 변경)
         if above_ratio >= cfg.above_threshold_ratio_r1:
             return RuleSelectionResult(
                 ticker=ticker,
@@ -247,6 +246,16 @@ class AdaptiveRuleSelector:
                 metrics=metrics,
                 reason=f"+{cfg.score_threshold:.0f} 이상 머문 비율 {above_ratio:.0%} "
                        f"≥ {cfg.above_threshold_ratio_r1:.0%} (임계 돌파형)",
+            )
+
+        # Rule 5: R3 (계단형 추세) — threshold 돌파 없이 평균 양수 + 진동
+        if sign_chg >= cfg.sign_change_min_r3 and avg > 0:
+            return RuleSelectionResult(
+                ticker=ticker,
+                selected_rule="R3",
+                confidence=0.80,
+                metrics=metrics,
+                reason=f"부호 전환 {sign_chg}회 + 평균 {avg:+.2f} > 0 (계단형 추세)",
             )
 
         # Rule 6: 모호 → SKIP

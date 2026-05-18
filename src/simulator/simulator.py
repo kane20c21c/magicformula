@@ -14,21 +14,24 @@ simulator/simulator.py
 - 종목당 투입 자본: CAPITAL_PER_TRADE = 20_000_000 원
 - 수량 = floor(CAPITAL_PER_TRADE / 체결가)
 
-분할 청산 (C2)
---------------
-- 1차: 원래 수량의 30% → target1(ATR×1) 달성 시 당일 target1 가격에 체결
-- 2차: 원래 수량의 40% → target2(ATR×2) 달성 시 당일 target2 가격에 체결
-- 3차: 잔여(30%)      → target3(ATR×3) 달성 시 당일 target3 가격에 체결
-
-C1/C3/C4 는 조건 충족 다음날 시가에 잔량 전량 청산.
-백테스트 종료일에 미청산 잔량은 종가로 강제 청산.
+청산 규칙 (v3 — 와이코프 익절 도입)
+-------------------------------------
+- C1    : 종가 < 손절가(진입가 - ATR×1) → 다음날 시가 전량 청산 (손절)
+- C_WY  : 와이코프 추세 전환 신호 → 다음날 시가 전량 청산 (익절/추세종료)
+            · 신호1: composite_score 가 3일 연속 0 미만
+            · 신호2: 진입 점수 대비 4.0 이상 하락 + 현재 점수 음수
+- C3    : composite_score ≤ -3 → 다음날 시가 전량 청산 (급락 안전망)
+- END   : 백테스트 종료일 미청산 잔량 → 종가 강제 청산
 
 Look-ahead bias 방지
 --------------------
 - t일 시그널 → t+1일 시가로 체결
-- t일 종가로 C1/C3/C4 판단 → t+1일 시가로 청산
-- C2는 t일 고가가 목표가 이상이면 t일에 해당 목표가로 체결
-  (일중 최고가 기준: 약간 낙관적이나 일별 백테스트 표준 가정)
+- t일 종가로 C1/C_WY/C3 판단 → t+1일 시가로 청산
+
+변경 이력
+---------
+v3 : C2(ATR 분할 익절) 제거 → C_WY(와이코프 점수 반전 익절) 도입.
+     Position 에서 targets·partial_done 제거, entry_score·consec_neg_days 추가.
 """
 
 from __future__ import annotations
@@ -41,10 +44,13 @@ import numpy as np
 import pandas as pd
 
 from signals.rules import (
-    PARTIAL_RATIOS,
-    check_c1, check_c2, check_c3, check_c4,
-    compute_exit_prices, entry_signals,
+    check_c1, check_wyckoff_exit, check_c3,
+    compute_stop_loss, entry_signals,
 )
+from signals.adaptive_rule_selector import AdaptiveRuleSelector, RuleSelectionConfig
+
+# ADAPTIVE 동적 분류에 사용할 lookback 기간 (거래일)
+ADAPTIVE_LOOKBACK_DAYS = 60
 
 # ---------------------------------------------------------------------------
 # 거래 비용 상수
@@ -63,7 +69,7 @@ TAX_SELL          = 0.002        # 0.20%
 
 @dataclass
 class TradeRecord:
-    """청산된 부분 거래 1건을 기록한다."""
+    """청산된 거래 1건을 기록한다."""
     ticker:       str
     entry_date:   pd.Timestamp
     exit_date:    pd.Timestamp
@@ -72,7 +78,7 @@ class TradeRecord:
     quantity:     int
     gross_pnl:    float          # 수수료·세금 차감 전 손익
     net_pnl:      float          # 수수료·세금 차감 후 손익
-    exit_reason:  str            # C1 / C2_1 / C2_2 / C2_3 / C3 / C4 / END
+    exit_reason:  str            # C1 / C_WY / C3 / END
 
     @property
     def return_pct(self) -> float:
@@ -83,29 +89,15 @@ class TradeRecord:
 
 @dataclass
 class Position:
-    """열린 포지션 상태를 추적한다."""
-    ticker:       str
-    entry_date:   pd.Timestamp
-    entry_price:  float
-    orig_qty:     int            # 최초 매수 수량
-    remaining:    int            # 잔여 수량
-    stop_loss:    float
-    targets:      list[float]    # [t1, t2, t3]
-    partial_done: list[bool] = field(default_factory=lambda: [False, False, False])
-    days_held:    int = 0
-
-    # 분할 청산 비율별 수량
-    @property
-    def qty_each(self) -> list[int]:
-        """[30%, 40%, 30%] 각 단계의 수량 (C2-1, C2-2 는 floor, C2-3 은 잔량)."""
-        q1 = math.floor(self.orig_qty * PARTIAL_RATIOS[0])
-        q2 = math.floor(self.orig_qty * PARTIAL_RATIOS[1])
-        q3 = self.orig_qty - q1 - q2   # 잔량 전부
-        return [q1, q2, q3]
-
-    def unrealized_pnl_pct(self, current_price: float) -> float:
-        """미실현 손익률 (%)."""
-        return (current_price - self.entry_price) / self.entry_price * 100.0
+    """열린 포지션 상태를 추적한다 (v3: C_WY 와이코프 익절 지원)."""
+    ticker:          str
+    entry_date:      pd.Timestamp
+    entry_price:     float
+    orig_qty:        int            # 최초 매수 수량
+    remaining:       int            # 잔여 수량 (C_WY 단계에서 전량 청산)
+    stop_loss:       float
+    entry_score:     float          # 진입 당일 composite_score (C_WY 신호2 기준)
+    consec_neg_days: int = 0        # 보유 중 연속 음수 score 일수 (C_WY 신호1 카운터)
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +134,53 @@ def _net_pnl(entry_price_total: float, sell_proceeds: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# ADAPTIVE 동적 분류 헬퍼
+# ---------------------------------------------------------------------------
+
+def _compute_rolling_rule_series(
+    scored_df: pd.DataFrame,
+    trade_dates: list,
+    lookback_days: int = ADAPTIVE_LOOKBACK_DAYS,
+) -> pd.Series:
+    """
+    각 거래일마다 직전 lookback_days 거래일의 composite_score 패턴을 보고
+    R1 / R3 / SKIP 중 하나를 동적으로 분류한다.
+
+    Look-ahead bias 방지
+    --------------------
+    - date 당일 데이터를 포함하지 않음: `scores.index < date` 조건 사용
+    - 워밍업 구간(scored_df에 포함된 trade_start 이전 데이터)이 lookback 창으로 활용됨
+
+    R2 분류 처리
+    ------------
+    AdaptiveRuleSelector가 R2(직진 폭등형)를 반환할 경우 R1으로 통합.
+    (R2는 RULES에서 제거됐으므로 R1 진입 신호를 대신 사용)
+
+    Parameters
+    ----------
+    scored_df   : 전체 기간 DataFrame (워밍업 포함, composite_score 컬럼 필요)
+    trade_dates : 실거래 구간 날짜 리스트 (루프 대상)
+    lookback_days : 분류에 사용할 직전 거래일 수
+
+    Returns
+    -------
+    pd.Series — index: date, value: 'R1' / 'R3' / 'SKIP'
+    """
+    cfg      = RuleSelectionConfig(lookback_days=lookback_days)
+    selector = AdaptiveRuleSelector(cfg)
+    scores   = scored_df["composite_score"]
+
+    rule_map: dict = {}
+    for date in trade_dates:
+        past = scores[scores.index < date]          # look-ahead bias 방지
+        raw  = selector.select_rule("_", past).selected_rule
+        # R2 → R1 통합 (R2는 시뮬레이터에서 지원하지 않음)
+        rule_map[date] = "R1" if raw == "R2" else raw
+
+    return pd.Series(rule_map)
+
+
+# ---------------------------------------------------------------------------
 # 단일 종목 시뮬레이터
 # ---------------------------------------------------------------------------
 
@@ -165,6 +204,8 @@ def simulate_ticker(
     trade_start      : 실거래 시작일 (이전은 워밍업 구간 — 신호 생성 안 함)
     trade_end        : 백테스트 종료일
     entry_threshold  : R1·R2 진입 임계값 (기본 5.0). R3 는 항상 0 기준.
+
+    청산 우선순위: C1(손절) → C_WY(와이코프) → C3(급락 안전망)
 
     Returns
     -------
@@ -190,16 +231,31 @@ def simulate_ticker(
     # 진입 예약 (t일 시그널 → t+1일 체결)
     pending_entry: Optional[pd.Timestamp] = None
 
-    # 청산 예약 (C1/C3/C4 → 다음날 시가 청산)
+    # 청산 예약 (C1/C_WY/C3 → 다음날 시가 청산)
     pending_exit_reason: Optional[str] = None
 
     # 보유 중 여부 (R2 중복 진입 방지용)
     in_position = pd.Series(False, index=df.index)
 
     # 전체 진입 신호 사전 계산 (threshold 전달)
-    all_signals = entry_signals(scored_df, rule, in_position, threshold=entry_threshold)
-    # 실거래 구간으로 필터
-    signals = all_signals.reindex(df.index, fill_value=False)
+    if rule == "ADAPTIVE":
+        # 동적 rolling 분류: 진입 신호 당일 직전 40거래일 패턴으로 R1/R3/SKIP 결정
+        _rolling_rules = _compute_rolling_rule_series(scored_df, dates)
+        _r1_sigs = entry_signals(scored_df, "R1", in_position,
+                                 threshold=entry_threshold).reindex(df.index, fill_value=False)
+        _r3_sigs = entry_signals(scored_df, "R3", in_position,
+                                 threshold=entry_threshold).reindex(df.index, fill_value=False)
+        signals = pd.Series(False, index=df.index)
+        for _d in dates:
+            _assigned = _rolling_rules.get(_d, "SKIP")
+            if _assigned == "R1" and _r1_sigs.get(_d, False):
+                signals[_d] = True
+            elif _assigned == "R3" and _r3_sigs.get(_d, False):
+                signals[_d] = True
+    else:
+        all_signals = entry_signals(scored_df, rule, in_position, threshold=entry_threshold)
+        # 실거래 구간으로 필터
+        signals = all_signals.reindex(df.index, fill_value=False)
 
     for i, date in enumerate(dates):
         row    = df.loc[date]
@@ -210,7 +266,7 @@ def simulate_ticker(
         score  = row["composite_score"]
         atr    = row.get("atr14", np.nan)
 
-        # --- 1. 청산 예약 실행 (전날 C1/C3/C4 트리거 → 오늘 시가) ---
+        # --- 1. 청산 예약 실행 (전날 C1/C_WY/C3 트리거 → 오늘 시가) ---
         if pending_exit_reason and position is not None:
             qty_to_sell = position.remaining
             if qty_to_sell > 0:
@@ -244,71 +300,34 @@ def simulate_ticker(
             exec_price = _exec_buy_price(o)
             qty = math.floor(CAPITAL_PER_TRADE / exec_price)
             if qty > 0 and not np.isnan(atr) and atr > 0:
-                exit_p = compute_exit_prices(exec_price, atr)
                 position = Position(
                     ticker=ticker,
                     entry_date=date,
                     entry_price=exec_price,
                     orig_qty=qty,
                     remaining=qty,
-                    stop_loss=exit_p["stop_loss"],
-                    targets=[exit_p["target1"], exit_p["target2"], exit_p["target3"]],
+                    stop_loss=compute_stop_loss(exec_price, atr),
+                    entry_score=score,   # 진입 당일 composite_score (C_WY 기준점)
                 )
             pending_entry = None
 
         # --- 3. 보유 중인 포지션 처리 ---
         if position is not None:
-            position.days_held += 1
-
-            # C2: 분할 익절 (당일 고가 기준, 당일 목표가로 체결)
-            triggered_stages = check_c2(h, position.targets, position.partial_done)
-            qty_each = position.qty_each
-
-            for stage in triggered_stages:
-                tgt_price = position.targets[stage]
-                qty_stage = qty_each[stage]
-                # 마지막 단계는 잔량 전부
-                if stage == 2:
-                    qty_stage = position.remaining
-                qty_stage = min(qty_stage, position.remaining)
-                if qty_stage <= 0:
-                    continue
-
-                cost_basis = position.entry_price * qty_stage
-                proceeds   = _sell_proceeds(tgt_price, qty_stage)
-                gross      = (_exec_sell_price(tgt_price) - position.entry_price) * qty_stage
-
-                trades.append(TradeRecord(
-                    ticker=ticker,
-                    entry_date=position.entry_date,
-                    exit_date=date,
-                    entry_price=position.entry_price,
-                    exit_price=_exec_sell_price(tgt_price),
-                    quantity=qty_stage,
-                    gross_pnl=gross,
-                    net_pnl=_net_pnl(
-                        cost_basis * (1.0 + SLIPPAGE_BUY + COMMISSION),
-                        proceeds,
-                    ),
-                    exit_reason=f"C2_{stage+1}",
-                ))
-                cumulative_pnl += trades[-1].net_pnl
-                position.remaining   -= qty_stage
-                position.partial_done[stage] = True
-
-            # 잔량 소진 확인
-            if position.remaining <= 0:
-                position = None
+            # C_WY 카운터: 연속 음수 score 추적 (신호1용)
+            if score < 0:
+                position.consec_neg_days += 1
             else:
-                # C1: 종가 손절 판단
-                if check_c1(c, position.stop_loss):
-                    pending_exit_reason = "C1"
-                # C3: 점수 반전 판단
-                elif check_c3(score):
-                    pending_exit_reason = "C3"
-                # C4: 시간 청산 판단
-                elif check_c4(position.days_held, position.unrealized_pnl_pct(c)):
-                    pending_exit_reason = "C4"
+                position.consec_neg_days = 0
+
+            # C1: 종가 손절 판단 (최우선)
+            if check_c1(c, position.stop_loss):
+                pending_exit_reason = "C1"
+            # C_WY: 와이코프 추세 전환 신호 (익절/추세종료)
+            elif check_wyckoff_exit(score, position.entry_score, position.consec_neg_days):
+                pending_exit_reason = "C_WY"
+            # C3: score ≤ -3 급락 안전망 (C_WY 보다 score 가 더 급격히 떨어질 때)
+            elif check_c3(score):
+                pending_exit_reason = "C3"
 
         # --- 4. 신호 확인 → 다음날 진입 예약 ---
         if position is None and pending_exit_reason is None and signals.get(date, False):

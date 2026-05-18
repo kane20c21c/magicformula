@@ -80,7 +80,8 @@ try:
     TICKER_LIST: list[str] = sorted(_CORE_TICKERS - _EXCLUDE_TICKERS)
 except Exception:
     TICKER_LIST = sorted(k for k in TICKER_NAMES_ALL.keys() if k not in _EXCLUDE_TICKERS)
-from signals.rules       import entry_signals, ENTRY_THRESHOLD
+from signals.rules                  import entry_signals, ENTRY_THRESHOLD
+from signals.adaptive_rule_selector import select_rules_for_backtest
 from simulator.simulator import run_simulation, trades_to_df
 from metrics.metrics     import compute_metrics, format_report, INITIAL_CAPITAL
 from optimizer.optimizer import (
@@ -489,21 +490,45 @@ def main():
         tdf     = trades_to_df(trades_list)
         metrics = compute_metrics(tdf, equity_df, kospi_df, trade_start, trade_end)
 
-        print("\n=== Quick Test 결과 ===")
+        print("\n=== Quick Test 결과 (R1) ===")
         print(format_report(metrics, "Basic", "R1"))
 
         if not tdf.empty:
             out = output_dir / "quick_test_trades.csv"
             tdf.to_csv(out, index=False, encoding="utf-8-sig")
-            print(f"\n거래 기록 저장: {out}")
+            print(f"\n  R1 거래 기록: {out}")
+
+        # -------------------------------------------------------------------
+        # ★ ADAPTIVE 시뮬레이션 (Basic 가중치)
+        # -------------------------------------------------------------------
+        print(f"\n[Quick Test] ADAPTIVE 시뮬레이션 — 동적 rolling 분류 (40거래일)")
+        # v3: 정적 워밍업 분류 제거 → simulator 내부에서 진입 신호 당일 rolling 분류
+
+        _adp_trades, _adp_eq = run_simulation(
+            scored_data, "ADAPTIVE", trade_start, trade_end,
+            entry_threshold=args.threshold,
+        )
+        _adp_tdf     = trades_to_df(_adp_trades)
+        _adp_metrics = compute_metrics(
+            _adp_tdf, _adp_eq, kospi_df, trade_start, trade_end
+        )
+
+        print("\n=== Quick Test 결과 (ADAPTIVE) ===")
+        print(format_report(_adp_metrics, "Basic", "ADAPTIVE"))
+
+        if not _adp_tdf.empty:
+            _adp_out = output_dir / "quick_test_adaptive_trades.csv"
+            _adp_tdf.to_csv(_adp_out, index=False, encoding="utf-8-sig")
+            print(f"\n  ADAPTIVE 거래 기록: {_adp_out}")
 
         print("\n[Quick Test 완료]")
         return
 
     # -----------------------------------------------------------------------
-    # Step 3: 전체 백테스트 (51조합 × 3규칙)
+    # Step 3: 전체 백테스트 (51조합 × 4규칙)
     # -----------------------------------------------------------------------
-    print("\n[Step 2] 백테스트 실행 (51조합 × 3규칙 × 10종목 = 1,530회)")
+    import pandas as _pd_loop
+    print(f"\n[Step 2] 백테스트 실행 ({len(generate_weight_combinations())}조합 × {len(RULES)}규칙 = {len(generate_weight_combinations())*len(RULES)}회)")
     print(f"  파라미터: area4_mode={args.area4_mode!r}  threshold={args.threshold}")
 
     # 점수 캐시: 조합당 1회만 compute_scores 호출
@@ -539,6 +564,7 @@ def main():
                 print(f"  [{run_count:3d}/{total_runs}] {label} / {rule}", end=" ... ", flush=True)
 
             try:
+                # ── 시뮬레이션 실행 (ADAPTIVE 포함 — 동적 rolling 분류는 simulator 내부 처리)
                 trades_list, equity_df = run_simulation(
                     scored_data, rule, trade_start, trade_end,
                     entry_threshold=args.threshold,
