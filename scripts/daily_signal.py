@@ -282,7 +282,18 @@ def run(target_date: str | None = None) -> dict:
     json_path = OUTPUT_DIR / f"daily_signal_{date_str}.json"
     md_path   = OUTPUT_DIR / f"daily_signal_{date_str}.md"
 
-    json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _json_default(obj):
+        """numpy bool_ / int_ / float_ → Python 기본 타입 변환."""
+        import numpy as np
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+    json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
     print(f"\n[daily_signal] JSON 저장: {json_path}")
 
     _write_md(result, md_path)
