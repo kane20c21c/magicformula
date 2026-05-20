@@ -27,41 +27,29 @@ from typing import Optional
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# 경로 설정 (src/ 디렉터리를 sys.path에 추가)
+# 경로 설정 — Magic Formula 루트를 sys.path 에 추가 (P5a)
 # ---------------------------------------------------------------------------
 
-_SRC = Path(__file__).parent.parent
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_PROJ_ROOT = Path(__file__).parent.parent.parent          # Magic Formula/
+if str(_PROJ_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJ_ROOT))
 
-from data.collector import get_backtest_split, TICKERS
-from signals.adaptive_rule_selector import select_rules_for_backtest
+from magic_formula.data.collector import get_backtest_split, TICKERS
+from magic_formula.signals.adaptive_rule_selector import select_rules_for_backtest
 
 # ---------------------------------------------------------------------------
-# 59종목 TICKER_LIST (longlivevault CORE_TICKERS 우선)
+# 종목 universe — _vault 가 vault path + CORE_TICKERS + EXCLUDE 를 단일화 (P3)
 # ---------------------------------------------------------------------------
 
-_VAULT_PATH = next(
-    (p for p in [
-        str(_SRC.parent.parent / "longlivevault"),
-        "/Users/kaneyoun/DriveForALL/StoLab/longlivevault",
-    ] if Path(p).exists()),
-    str(_SRC.parent.parent / "longlivevault"),
-)
-if _VAULT_PATH not in sys.path:
-    sys.path.insert(0, _VAULT_PATH)
+from magic_formula._vault import get_universe   # noqa: E402
 
-# 사업 분할 등 분석 제외 종목
-_EXCLUDE_TICKERS = {"207940", "0126Z0"}  # 삼성바이오로직스, 삼성에피스홀딩스
+TICKER_LIST: list[str] = get_universe("core_57")
+if not TICKER_LIST:
+    TICKER_LIST = sorted(TICKERS.keys())
 
-try:
-    from stolab_data.ohlcv_store import CORE_TICKERS as _CORE_TICKERS  # type: ignore
-    TICKER_LIST: list[str] = sorted(_CORE_TICKERS - _EXCLUDE_TICKERS)
-except Exception:
-    TICKER_LIST = sorted(k for k in TICKERS.keys() if k not in _EXCLUDE_TICKERS)
-from scoring.scorer import BASIC_WEIGHTS, compute_scores
-from simulator.simulator import run_simulation, simulate_ticker, trades_to_df
-from metrics.metrics import compute_metrics
+from magic_formula.scoring.scorer import BASIC_WEIGHTS, compute_scores
+from magic_formula.simulator.simulator import run_simulation, simulate_ticker, trades_to_df
+from magic_formula.metrics.metrics import compute_metrics
 
 # ---------------------------------------------------------------------------
 # 영역 키 순서 (고정)

@@ -1,0 +1,24 @@
+# Magic Formula — 황금률 백테스트 / 데일리 시그널 의존성
+# ----------------------------------------------------------
+# 설치:
+#   pip install -r requirements.txt
+#
+# 설치 후 데일리 실행 확인:
+#   python scripts/daily_signal.py
+#
+# 참고:
+#   - longlivevault 는 별도 폴더로 sys.path 에 추가되어 import 됩니다.
+#     vault 자체 의존성(pykrx 등)은 vault/requirements.txt 를 참고하세요.
+#   - matplotlib / wyckoff_analysis (hillstorm) 는 선택 의존성 — 없어도
+#     데일리는 정상 동작 (백테스트 차트와 Wyckoff Area5 점수만 비활성화).
+
+# ── 필수 의존성 ──────────────────────────────────────────
+pandas>=2.0           # OHLCV / 점수 / 시뮬레이터 / 메트릭
+numpy>=1.24           # 수치 연산
+pyyaml>=6.0           # configs/active_strategy.yaml 로더
+
+# ── vault parquet 읽기 (vault 가 이미 사용 중이면 중복 OK) ──
+pyarrow>=14.0         # 또는 fastparquet — 둘 중 하나만 있어도 됨
+
+# ── 선택 의존성 (있으면 더 풍부, 없어도 동작) ─────────────
+# matplotlib>=3.7     # analysis/backtest 의 equity_curves.png 차트

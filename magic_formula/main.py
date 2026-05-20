@@ -41,50 +41,41 @@ from datetime import datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# sys.path 설정 (src/ 를 기준으로 모듈 탐색)
+# sys.path 설정 — Magic Formula 루트(magic_formula 의 부모)를 추가하면
+# `import magic_formula.xxx` 가 동작. (P5a)
 # ---------------------------------------------------------------------------
 
-SRC_DIR    = Path(__file__).parent
-PROJ_DIR   = SRC_DIR.parent
+PKG_DIR    = Path(__file__).parent            # magic_formula/
+PROJ_DIR   = PKG_DIR.parent                   # Magic Formula/
 OUTPUT_DIR = PROJ_DIR / "output"
 
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+if str(PROJ_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJ_DIR))
 
 # ---------------------------------------------------------------------------
 # 모듈 임포트
 # ---------------------------------------------------------------------------
 
-from data.collector      import collect_all, get_backtest_split, _date_range, TICKERS as TICKER_NAMES_ALL
-from scoring.scorer      import compute_scores, BASIC_WEIGHTS, AREA4_MODES
+from magic_formula.data.collector      import collect_all, get_backtest_split, _date_range, TICKERS as TICKER_NAMES_ALL
+from magic_formula.scoring.scorer      import compute_scores, BASIC_WEIGHTS, AREA4_MODES
 
 # ---------------------------------------------------------------------------
-# 59종목 TICKER_LIST — longlivevault CORE_TICKERS 우선, 없으면 collector.TICKERS
+# 종목 universe — _vault 가 vault path + CORE_TICKERS + EXCLUDE 를 단일화 (P3)
 # ---------------------------------------------------------------------------
 
-_VAULT_PATH = next(
-    (p for p in [
-        str(SRC_DIR.parent.parent / "longlivevault"),
-        "/Users/kaneyoun/DriveForALL/StoLab/longlivevault",
-    ] if Path(p).exists()),
-    str(SRC_DIR.parent.parent / "longlivevault"),
-)
-if _VAULT_PATH not in sys.path:
-    sys.path.insert(0, _VAULT_PATH)
+from magic_formula._vault import get_universe   # noqa: E402
 
-# 사업 분할 등 분석 제외 종목
-_EXCLUDE_TICKERS = {"207940", "0126Z0"}  # 삼성바이오로직스, 삼성에피스홀딩스
+# 백테스트는 "core_57" — vault CORE_TICKERS 에서 분석 제외 종목(0126Z0/207940) 뺀 57개
+TICKER_LIST: list[str] = get_universe("core_57")
+if not TICKER_LIST:
+    # vault 미설치 폴백 — collector.TICKERS 키 사용 (구성 동일)
+    TICKER_LIST = sorted(TICKER_NAMES_ALL.keys())
 
-try:
-    from stolab_data.ohlcv_store import CORE_TICKERS as _CORE_TICKERS  # type: ignore
-    TICKER_LIST: list[str] = sorted(_CORE_TICKERS - _EXCLUDE_TICKERS)
-except Exception:
-    TICKER_LIST = sorted(k for k in TICKER_NAMES_ALL.keys() if k not in _EXCLUDE_TICKERS)
-from signals.rules                  import entry_signals, ENTRY_THRESHOLD
-from signals.adaptive_rule_selector import select_rules_for_backtest
-from simulator.simulator import run_simulation, trades_to_df
-from metrics.metrics     import compute_metrics, format_report, INITIAL_CAPITAL
-from optimizer.optimizer import (
+from magic_formula.signals.rules                  import entry_signals, ENTRY_THRESHOLD
+from magic_formula.signals.adaptive_rule_selector import select_rules_for_backtest
+from magic_formula.simulator.simulator import run_simulation, trades_to_df
+from magic_formula.metrics.metrics     import compute_metrics, format_report, INITIAL_CAPITAL
+from magic_formula.optimizer.optimizer import (
     generate_weight_combinations,
     run_all,
     make_backtest_report_md,

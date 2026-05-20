@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- com.stolab.magic-formula.daily-signal.plist
+     Magic Formula 데일리 시그널, 평일 20:40 KST 자동 실행.
+     vault 의 launchd 등록 방식을 따른다.
+     등록/제거 명령은 configs/launchd/README.md 참고.
+     KST 20:40 시점은 longlivevault kis_update.py 의 2차 KIS 종가 배치(20:30) 직후로,
+     vault tickers parquet 에 당일 종가가 반영돼 있어 데일리 점수가 정확하다. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stolab.magic-formula.daily-signal</string>
+
+    <!-- 실행 명령
+         /usr/bin/env 로 사용자 PATH 의 python3 를 찾는다. pyenv/conda 사용 시
+         그 환경의 python3 가 잡힌다. PATH 가 비어있을 경우 EnvironmentVariables 의
+         PATH 항목이 도움이 된다. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_signal.py</string>
+    </array>
+
+    <!-- 작업 디렉토리 -->
+    <key>WorkingDirectory</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula</string>
+
+    <!-- 환경 변수: launchd 가 기본적으로 PATH 가 비어있어 python3 못 찾는 경우 대비.
+         Homebrew(Apple Silicon /opt/homebrew + Intel /usr/local) + 시스템 + pyenv 순. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/kaneyoun/.pyenv/shims</string>
+    </dict>
+
+    <!-- 평일 (월~금) 20:40 실행
+         launchd Weekday: 0/7=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토 -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>3</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>4</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>5</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+    </array>
+
+    <!-- 로그 파일 -->
+    <key>StandardOutPath</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_signal.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_signal.err</string>
+
+    <!-- 실패한 작업이 즉시 재시도되지 않도록. KeepAlive false 가 기본. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

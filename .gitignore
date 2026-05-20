@@ -1,6 +1,8 @@
 # 캐시 / 데이터
 src/cache/
 output/
+!output/signals/        # 데일리 시그널 이력은 git에 추적 (분석 입력으로 사용)
+!output/signals/**
 
 # Python
 __pycache__/
@@ -14,5 +16,9 @@ __pycache__/
 
 # 환경
 .env
+
+# yaml — 기본 무시, 단 docs/ 와 configs/ 는 추적
 *.yaml
-!docs/
+!docs/**/*.yaml
+!configs/                # P2: active_strategy.yaml 보관소
+!configs/**

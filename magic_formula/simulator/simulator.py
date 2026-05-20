@@ -43,11 +43,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from signals.rules import (
+from magic_formula.signals.rules import (
     check_c1, check_wyckoff_exit, check_c3,
     compute_stop_loss, entry_signals,
 )
-from signals.adaptive_rule_selector import AdaptiveRuleSelector, RuleSelectionConfig
+from magic_formula.signals.adaptive_rule_selector import AdaptiveRuleSelector, RuleSelectionConfig
 
 # ADAPTIVE 동적 분류에 사용할 lookback 기간 (거래일)
 ADAPTIVE_LOOKBACK_DAYS = 60
