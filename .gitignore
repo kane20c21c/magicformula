@@ -17,6 +17,9 @@ __pycache__/
 # 환경
 .env
 
+# 운영 로그
+logs/
+
 # yaml — 기본 무시, 단 docs/ 와 configs/ 는 추적
 *.yaml
 !docs/**/*.yaml
