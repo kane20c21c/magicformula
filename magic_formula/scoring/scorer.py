@@ -139,7 +139,13 @@ def score_trend(df: pd.DataFrame) -> pd.Series:
       - MA 정배열: MA5>MA20>MA60 → +6 / MA5>MA20 → +3 / MA5<MA20<MA60 → -6 / 기타 → 0
       - MA 크로스(최근 5일): 골든크로스 → +4 / 데드크로스 → -4
       - MA60 기울기: 5일 기울기 백분율 × 30 → [-6, +6] 클리핑
+
+    엄격 정책 (Kane 2026-05-22): 검토 항목 중 하나라도 NaN 이면 그 행의 점수 = 0.
+    데이터 부족(< 65행 = MA60 + 5일 기울기) 시에도 0 시리즈 반환.
     """
+    if len(df) < 65:
+        return pd.Series(0.0, index=df.index)
+
     close = df["Close"]
 
     # --- Moving averages ---
@@ -169,7 +175,8 @@ def score_trend(df: pd.DataFrame) -> pd.Series:
     slope_score = (ma60_slope_pct * 30.0).clip(-6.0, 6.0)
 
     raw = (align + cross_score + slope_score) / 3.0
-    return _clip(raw)
+    # 엄격 정책: 구성 항목 중 하나라도 NaN 이면 그 행의 점수 = 0
+    return _clip(raw).fillna(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +204,14 @@ def score_momentum(df: pd.DataFrame) -> pd.Series:
     변경 전(역추세)과 비교:
       RSI 70 이상 추세 상승 중: 이전 -7~-10  →  이제 +4~+6
       → Area2 가 Area1/Area4 와 같은 방향으로 종합점수 기여
+
+    엄격 정책 (Kane 2026-05-22): 검토 항목 4개(RSI / Stoch / MACDvsSignal / HistDir)
+    중 하나라도 NaN 이면 그 행의 점수 = 0.
+    데이터 부족(< 35행 = MACD 26 + signal 9) 시에도 0 시리즈 반환.
     """
+    if len(df) < 35:
+        return pd.Series(0.0, index=df.index)
+
     close = df["Close"]
     high  = df["High"]
     low   = df["Low"]
@@ -210,22 +224,27 @@ def score_momentum(df: pd.DataFrame) -> pd.Series:
     stoch_vals  = _stoch_k(high, low, close)
     stoch_score = _clip((stoch_vals - 50.0) / 5.0)
 
-    # ③ MACD vs Signal (기존 유지)
+    # ③ MACD vs Signal — NaN 보존 (NaN 비교가 False 로 평가되어 강제 -5 점수
+    #    부여되는 결함 차단 / 2026-05-22)
     macd_line, signal_line, hist = _macd(close)
-    macd_vs_signal = pd.Series(
-        np.where(macd_line > signal_line, 5.0, -5.0), index=close.index
-    )
+    valid = macd_line.notna() & signal_line.notna()
+    macd_vs_signal = pd.Series(np.nan, index=close.index)
+    macd_vs_signal.loc[valid & (macd_line >  signal_line)] =  5.0
+    macd_vs_signal.loc[valid & (macd_line <= signal_line)] = -5.0
 
-    # ④ MACD Histogram 3일 방향 (기존 유지)
+    # ④ MACD Histogram 3일 방향 — NaN 보존 (위와 동일 결함)
     h1 = hist.shift(0)
     h2 = hist.shift(1)
     h3 = hist.shift(2)
-    hist_dir = pd.Series(0.0, index=close.index)
-    hist_dir[(h1 > h2) & (h2 > h3)] =  2.0
-    hist_dir[(h1 < h2) & (h2 < h3)] = -2.0
+    hist_dir = pd.Series(np.nan, index=close.index)
+    hist_valid = h1.notna() & h2.notna() & h3.notna()
+    hist_dir.loc[hist_valid] = 0.0
+    hist_dir.loc[hist_valid & (h1 > h2) & (h2 > h3)] =  2.0
+    hist_dir.loc[hist_valid & (h1 < h2) & (h2 < h3)] = -2.0
 
     raw = (rsi_score + stoch_score + macd_vs_signal + hist_dir) / 4.0
-    return _clip(raw)
+    # 엄격 정책: 4개 구성 항목 중 하나라도 NaN 이면 그 행의 점수 = 0
+    return _clip(raw).fillna(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -239,29 +258,43 @@ def score_volume(df: pd.DataFrame) -> pd.Series:
     구성 요소:
       - 상대거래량 (Vol / Vol_MA20) → 구간별 점수
       - OBV 방향 (5일 기울기): 상승 → +5 / 하락 → -5
+
+    엄격 정책 (Kane 2026-05-22): 검토 항목 2개(rel_vol / obv_slope)
+    중 하나라도 NaN 이면 그 행의 점수 = 0.
+    데이터 부족(< 25행 = Vol_MA20 + OBV slope 5일 여유) 시에도 0 시리즈 반환.
     """
+    if len(df) < 25:
+        return pd.Series(0.0, index=df.index)
+
     close  = df["Close"]
     volume = df["Volume"]
 
-    # 상대거래량
+    # 상대거래량 — vol_ma20 가 NaN 이면 rel_score 도 NaN (기존: 0.0 기본값으로
+    # 데이터 부족 시 가짜 점수 산출. 2026-05-22 수정)
     vol_ma20 = volume.rolling(20).mean()
     rel_vol  = volume / vol_ma20.replace(0, np.nan)
 
-    rel_score = pd.Series(0.0, index=close.index)
-    rel_score[rel_vol > 2.0]                           = 8.0
-    rel_score[(rel_vol > 1.5) & (rel_vol <= 2.0)]     = 5.0
-    rel_score[(rel_vol > 1.0) & (rel_vol <= 1.5)]     = 2.0
-    rel_score[(rel_vol > 0.7) & (rel_vol <= 1.0)]     = 0.0
-    rel_score[rel_vol <= 0.7]                          = -3.0
+    rel_score = pd.Series(np.nan, index=close.index)
+    rel_valid = rel_vol.notna()
+    rel_score.loc[rel_valid] = 0.0
+    rel_score.loc[rel_valid & (rel_vol > 2.0)]                           =  8.0
+    rel_score.loc[rel_valid & (rel_vol > 1.5) & (rel_vol <= 2.0)]        =  5.0
+    rel_score.loc[rel_valid & (rel_vol > 1.0) & (rel_vol <= 1.5)]        =  2.0
+    rel_score.loc[rel_valid & (rel_vol > 0.7) & (rel_vol <= 1.0)]        =  0.0
+    rel_score.loc[rel_valid & (rel_vol <= 0.7)]                          = -3.0
 
-    # OBV 방향
+    # OBV 방향 — NaN 보존 (NaN 비교가 False 로 평가되어 강제 -5 점수
+    # 부여되는 결함 차단 / 2026-05-22)
     obv_vals  = _obv(close, volume)
     obv_slope = obv_vals - obv_vals.shift(5)
-    obv_score = pd.Series(np.where(obv_slope > 0, 5.0, -5.0), index=close.index)
-    obv_score[obv_slope.isna()] = 0.0
+    obv_score = pd.Series(np.nan, index=close.index)
+    obv_score.loc[obv_slope >  0] =  5.0
+    obv_score.loc[obv_slope <= 0] = -5.0
+    # obv_slope 가 NaN 인 행은 obv_score 도 NaN (위 두 분기 적용 안 됨)
 
     raw = (rel_score + obv_score) / 2.0
-    return _clip(raw)
+    # 엄격 정책: rel_score / obv_score 중 하나라도 NaN 이면 그 행의 점수 = 0
+    return _clip(raw).fillna(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -292,27 +325,41 @@ def score_volatility(df: pd.DataFrame) -> pd.Series:
     BB %B  : <0.1→+8, 0.1~0.2→+5, 0.2~0.4→+2, 0.4~0.6→0,
              0.6~0.8→-2, 0.8~0.9→-5, >0.9→-8
     52주   : <0.2→+4, 0.2~0.4→+2, 0.4~0.6→0, 0.6~0.8→-2, >0.8→-4
+
+    엄격 정책 (Kane 2026-05-22): 검토 항목 2개(BB %B / 52주 위치)
+    중 하나라도 NaN 이면 그 행의 점수 = 0.
+    데이터 부족(< 60행) 시에도 0 시리즈 반환.
     """
+    if len(df) < 60:
+        return pd.Series(0.0, index=df.index)
+
     pct_b, pos_52w = _bb_pos_raw(df)
     idx = df["Close"].index
 
-    bb_score = pd.Series(0.0, index=idx)
-    bb_score[pct_b < 0.1]                         =  8.0
-    bb_score[(pct_b >= 0.1) & (pct_b < 0.2)]     =  5.0
-    bb_score[(pct_b >= 0.2) & (pct_b < 0.4)]     =  2.0
-    bb_score[(pct_b >= 0.4) & (pct_b < 0.6)]     =  0.0
-    bb_score[(pct_b >= 0.6) & (pct_b < 0.8)]     = -2.0
-    bb_score[(pct_b >= 0.8) & (pct_b < 0.9)]     = -5.0
-    bb_score[pct_b >= 0.9]                        = -8.0
+    # 기본값을 NaN 으로 두고, 값이 있는 행만 점수 부여 (데이터 부족 시 가짜
+    # 0점 산출 방지 / 2026-05-22)
+    bb_score = pd.Series(np.nan, index=idx)
+    bb_valid = pct_b.notna()
+    bb_score.loc[bb_valid] = 0.0
+    bb_score.loc[bb_valid & (pct_b < 0.1)]                         =  8.0
+    bb_score.loc[bb_valid & (pct_b >= 0.1) & (pct_b < 0.2)]        =  5.0
+    bb_score.loc[bb_valid & (pct_b >= 0.2) & (pct_b < 0.4)]        =  2.0
+    bb_score.loc[bb_valid & (pct_b >= 0.4) & (pct_b < 0.6)]        =  0.0
+    bb_score.loc[bb_valid & (pct_b >= 0.6) & (pct_b < 0.8)]        = -2.0
+    bb_score.loc[bb_valid & (pct_b >= 0.8) & (pct_b < 0.9)]        = -5.0
+    bb_score.loc[bb_valid & (pct_b >= 0.9)]                        = -8.0
 
-    pos_score = pd.Series(0.0, index=idx)
-    pos_score[pos_52w < 0.2]                          =  4.0
-    pos_score[(pos_52w >= 0.2) & (pos_52w < 0.4)]    =  2.0
-    pos_score[(pos_52w >= 0.4) & (pos_52w < 0.6)]    =  0.0
-    pos_score[(pos_52w >= 0.6) & (pos_52w < 0.8)]    = -2.0
-    pos_score[pos_52w >= 0.8]                         = -4.0
+    pos_score = pd.Series(np.nan, index=idx)
+    pos_valid = pos_52w.notna()
+    pos_score.loc[pos_valid] = 0.0
+    pos_score.loc[pos_valid & (pos_52w < 0.2)]                         =  4.0
+    pos_score.loc[pos_valid & (pos_52w >= 0.2) & (pos_52w < 0.4)]      =  2.0
+    pos_score.loc[pos_valid & (pos_52w >= 0.4) & (pos_52w < 0.6)]      =  0.0
+    pos_score.loc[pos_valid & (pos_52w >= 0.6) & (pos_52w < 0.8)]      = -2.0
+    pos_score.loc[pos_valid & (pos_52w >= 0.8)]                        = -4.0
 
-    return _clip((bb_score + pos_score) / 2.0)
+    # 엄격 정책: bb_score / pos_score 중 하나라도 NaN 이면 그 행의 점수 = 0
+    return _clip((bb_score + pos_score) / 2.0).fillna(0.0)
 
 
 def score_volatility_trend(df: pd.DataFrame) -> pd.Series:
@@ -333,13 +380,21 @@ def score_volatility_trend(df: pd.DataFrame) -> pd.Series:
                "고점 = 추세 강도 확인"으로 해석하여
                상승 추세 중 Area4가 다른 영역(추세·모멘텀)과
                같은 방향을 지지하도록 한다.
+
+    엄격 정책 (Kane 2026-05-22): 검토 항목 2개(BB %B / 52주 위치)
+    중 하나라도 NaN 이면 그 행의 점수 = 0.
+    데이터 부족(< 60행) 시에도 0 시리즈 반환.
     """
+    if len(df) < 60:
+        return pd.Series(0.0, index=df.index)
+
     pct_b, pos_52w = _bb_pos_raw(df)
 
     bb_score  = _clip((pct_b  - 0.5) * 20.0)
     pos_score = _clip((pos_52w - 0.5) * 20.0)
 
-    return _clip((bb_score + pos_score) / 2.0)
+    # 엄격 정책: bb_score / pos_score 중 하나라도 NaN 이면 그 행의 점수 = 0
+    return _clip((bb_score + pos_score) / 2.0).fillna(0.0)
 
 
 # ---------------------------------------------------------------------------
