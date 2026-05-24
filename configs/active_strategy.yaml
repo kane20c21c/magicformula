@@ -1,13 +1,13 @@
-strategy_id: CompR-Top1
-last_updated: '2026-05-20'
+strategy_id: CompR15
+last_updated: '2026-05-18'
 source_analysis: output/analysis/2026-05-18/weight_ranking.md
 weights:
-  trend: 0.23
-  momentum: 0.22
-  volume: 0.27
-  volatility: 0.1
-  wyckoff: 0.18
-rule: R3
+  trend: 0.30
+  momentum: 0.15
+  volume: 0.10
+  volatility: 0.25
+  wyckoff: 0.20
+rule: R1
 area4_mode: trend
 threshold: 5.0
-universe: core_59
+universe: core_all

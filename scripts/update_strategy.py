@@ -233,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--universe",
-        choices=["core_all", "core_59", "core_57"],
+        choices=["core_all", "core_excl_split", "core_59", "core_57"],
         help="종목 universe (생략 시 기존 값 유지)",
     )
     p.add_argument(

@@ -33,8 +33,11 @@ longlivevault 진입점 통합 헬퍼.
 
 universe 식별자
 ---------------
-- "core_all" / "core_59" : vault CORE_TICKERS 전체 (현재 59개) — 데일리용
-- "core_57"              : core_all - DEFAULT_EXCLUDE         — 백테스트용
+- "core_all"        : vault CORE_TICKERS 전체 — 데일리용 (현재 69개)
+- "core_excl_split" : core_all - DEFAULT_EXCLUDE — 백테스트용 (현재 67개)
+- "core_59" / "core_57" : 위의 두 식별자에 대한 deprecated alias
+                          (vault 코어가 60→69 로 확대돼 숫자가 안 맞지만,
+                           기존 yaml/launchd/스크립트 호환을 위해 유지)
 """
 
 from __future__ import annotations
@@ -138,6 +141,14 @@ TICKER_NAMES_FALLBACK: dict[str, str] = {
     # 인터넷통신
     "017670": "SK텔레콤",         "030200": "KT",                "032640": "LG유플러스",
     "035420": "NAVER",            "035720": "카카오",
+    # 자동차
+    "005380": "현대차",           "012330": "현대모비스",        "000270": "기아",
+    "161390": "한국타이어",       "204320": "HL만도",
+    # 자동차소부장
+    "009150": "삼성전기",         "011070": "LG이노텍",          "066570": "LG전자",
+    "307950": "현대오토에버",
+    # ETF
+    "102110": "TIGER 200",
 }
 
 # ---------------------------------------------------------------------------
@@ -145,21 +156,27 @@ TICKER_NAMES_FALLBACK: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 # universe 식별자 → ticker 집합 빌더
+# 정식 이름: core_all (전체) / core_excl_split (분석용)
+# core_59 / core_57 은 vault 가 60종목이던 시기의 deprecated alias —
+#   숫자는 더 이상 일치하지 않지만 호환을 위해 보존 (각각 core_all / core_excl_split 와 동일).
 _UNIVERSE_BUILDERS: dict[str, "callable"] = {
-    "core_all": lambda: sorted(CORE_TICKERS),
-    "core_59":  lambda: sorted(CORE_TICKERS),                            # core_all alias
-    "core_57":  lambda: sorted(CORE_TICKERS - DEFAULT_EXCLUDE),
+    "core_all":        lambda: sorted(CORE_TICKERS),
+    "core_excl_split": lambda: sorted(CORE_TICKERS - DEFAULT_EXCLUDE),
+    # ── deprecated aliases (호환용) ────────────────────────────
+    "core_59":         lambda: sorted(CORE_TICKERS),                       # core_all alias
+    "core_57":         lambda: sorted(CORE_TICKERS - DEFAULT_EXCLUDE),     # core_excl_split alias
 }
 
 
-def get_universe(name: str = "core_57") -> list[str]:
+def get_universe(name: str = "core_excl_split") -> list[str]:
     """
     universe 식별자를 ticker list 로 해석한다.
 
     Parameters
     ----------
-    name : "core_all" / "core_59" / "core_57"
-           ("core_57" 은 백테스트 / 분석 기본값, "core_59" 는 데일리 기본값)
+    name : "core_all" / "core_excl_split"
+           (백테스트/분석 기본값은 "core_excl_split", 데일리는 "core_all")
+           "core_59" / "core_57" 도 동작하나 deprecated — 새 코드는 사용 금지.
 
     Returns
     -------
@@ -234,8 +251,10 @@ if __name__ == "__main__":
     print(f"CORE_TICKERS     : {len(CORE_TICKERS)}개")
     print(f"DEFAULT_EXCLUDE  : {sorted(DEFAULT_EXCLUDE)}")
     print(f"SECTOR_ORDER     : {SECTOR_ORDER}")
-    print(f"core_all/59      : {len(get_universe('core_59'))}개")
-    print(f"core_57          : {len(get_universe('core_57'))}개")
+    print(f"core_all         : {len(get_universe('core_all'))}개")
+    print(f"core_excl_split  : {len(get_universe('core_excl_split'))}개")
+    print(f"  (legacy alias) core_59 = {len(get_universe('core_59'))}, "
+          f"core_57 = {len(get_universe('core_57'))}")
     print(f"079550 sector    : {get_sector('079550')!r}")
     print(f"079550 name      : {get_ticker_name('079550')!r}")
     print(f"079550 name(vault): {get_ticker_name('079550', 'LIG디펜스앤에어로스페이스')!r}")

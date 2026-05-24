@@ -65,8 +65,8 @@ from magic_formula.scoring.scorer      import compute_scores, BASIC_WEIGHTS, ARE
 
 from magic_formula._vault import get_universe   # noqa: E402
 
-# 백테스트는 "core_57" — vault CORE_TICKERS 에서 분석 제외 종목(0126Z0/207940) 뺀 57개
-TICKER_LIST: list[str] = get_universe("core_57")
+# 백테스트는 vault CORE_TICKERS 에서 분석 제외 종목(0126Z0/207940) 뺀 집합
+TICKER_LIST: list[str] = get_universe("core_excl_split")
 if not TICKER_LIST:
     # vault 미설치 폴백 — collector.TICKERS 키 사용 (구성 동일)
     TICKER_LIST = sorted(TICKER_NAMES_ALL.keys())

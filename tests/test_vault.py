@@ -50,22 +50,32 @@ def test_get_ticker_name_falls_back_to_ticker_when_unknown():
 # universe
 # ---------------------------------------------------------------------------
 
-def test_core_tickers_size():
-    """vault CORE_TICKERS 가 정확히 59개 + EXCLUDE 가 2개."""
-    assert len(CORE_TICKERS) == 59
+def test_core_tickers_basic():
+    """vault CORE_TICKERS 는 비어있지 않고, EXCLUDE 는 사업분할 2종목."""
+    assert len(CORE_TICKERS) > 0
     assert DEFAULT_EXCLUDE == frozenset({"207940", "0126Z0"})
+    # EXCLUDE 종목은 반드시 CORE_TICKERS 의 부분집합
+    assert DEFAULT_EXCLUDE.issubset(CORE_TICKERS)
 
 
-def test_universe_core_59():
-    assert len(get_universe("core_59")) == 59
-    assert len(get_universe("core_all")) == 59
+def test_universe_core_all():
+    """core_all = CORE_TICKERS 전체."""
+    universe = set(get_universe("core_all"))
+    assert universe == set(CORE_TICKERS)
+    assert len(get_universe("core_all")) == len(CORE_TICKERS)
 
 
-def test_universe_core_57():
-    """core_57 = CORE_TICKERS - EXCLUDE."""
-    universe = set(get_universe("core_57"))
-    assert len(universe) == 57
+def test_universe_core_excl_split():
+    """core_excl_split = CORE_TICKERS - DEFAULT_EXCLUDE."""
+    universe = set(get_universe("core_excl_split"))
     assert universe == set(CORE_TICKERS) - DEFAULT_EXCLUDE
+    assert len(universe) == len(CORE_TICKERS) - len(DEFAULT_EXCLUDE)
+
+
+def test_universe_legacy_aliases():
+    """core_59 / core_57 deprecated alias 가 새 이름과 동일 결과."""
+    assert get_universe("core_59") == get_universe("core_all")
+    assert get_universe("core_57") == get_universe("core_excl_split")
 
 
 def test_universe_unknown_raises():

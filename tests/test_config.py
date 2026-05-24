@@ -36,7 +36,7 @@ def _valid_dict():
         "rule": "R1",
         "area4_mode": "trend",
         "threshold": 5.0,
-        "universe": "core_59",
+        "universe": "core_all",
     }
 
 

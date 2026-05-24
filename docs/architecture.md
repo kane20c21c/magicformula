@@ -28,7 +28,7 @@
        │  ├ rule (R1 / R2 / R3 / ADAPTIVE)
        │  ├ area4_mode (trend / contrarian)
        │  ├ threshold
-       │  └ universe (core_57 / core_59 / core_all)
+       │  └ universe (core_all / core_excl_split, legacy: core_59 / core_57)
        └─────────────────────────────────────────────────┐
                                                          │
               ┌──────────────────────────────────────────┘
@@ -212,10 +212,13 @@ scripts/update_strategy.py
 
 | 식별자 | 종목 수 | 사용처 |
 |---|---|---|
-| `core_all` / `core_59` | 59 | 데일리 (전 종목 표시, 분석 제외 종목도 점수만은 산출) |
-| `core_57` | 57 | 분석 (사업분할 등 EXCLUDE 빼고 1,530회 백테스트) |
+| `core_all` | `len(CORE_TICKERS)` (현재 69) | 데일리 (전 종목 표시, 분석 제외 종목도 점수만은 산출) |
+| `core_excl_split` | `len(CORE_TICKERS - DEFAULT_EXCLUDE)` (현재 67) | 분석 (사업분할 등 EXCLUDE 빼고 1,530회 백테스트) |
+| `core_59` / `core_57` | (deprecated alias) | 60종목 시기의 이름. 각각 `core_all` / `core_excl_split` 와 동일하게 작동. 새 코드는 사용 금지. |
 
 `_vault.DEFAULT_EXCLUDE = {"207940": 삼성바이오로직스, "0126Z0": 삼성에피스홀딩스}` — 사업 분할로 시계열 신뢰성 낮은 종목 제외.
+
+코어 종목 수가 vault 에서 늘어나도 (60→69 등) 위 식별자는 그대로 작동 — 숫자가 아닌 의미(전체 / 분할제외) 로 정의되기 때문.
 
 ---
 

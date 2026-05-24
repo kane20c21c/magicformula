@@ -43,7 +43,7 @@ from magic_formula.signals.adaptive_rule_selector import select_rules_for_backte
 
 from magic_formula._vault import get_universe   # noqa: E402
 
-TICKER_LIST: list[str] = get_universe("core_57")
+TICKER_LIST: list[str] = get_universe("core_excl_split")
 if not TICKER_LIST:
     TICKER_LIST = sorted(TICKERS.keys())
 

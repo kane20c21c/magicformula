@@ -134,7 +134,7 @@ python scripts/update_strategy.py --from-ranking ... --dry-run
 | `rule` | 진입 규칙 | R1 / R2 / R3 / ADAPTIVE |
 | `area4_mode` | 변동성·위치 점수 산출 방식 | trend (추세추종) / contrarian (평균회귀) |
 | `threshold` | R1·R2 임계값 | float, 보통 +1 ~ +6 |
-| `universe` | 종목 집합 | core_57 (분석) / core_59 (데일리) / core_all |
+| `universe` | 종목 집합 | `core_all` (데일리) / `core_excl_split` (분석, 사업분할 제외) / `core_59`·`core_57` (deprecated alias) |
 
 ---
 
