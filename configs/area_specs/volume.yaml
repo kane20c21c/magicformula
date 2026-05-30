@@ -1,0 +1,102 @@
+# Area 3 — 거래량 (Volume) 영역 spec
+# 작성: 2026-05-30 Kane & 클로이 (M4 분석)
+# 출처: docs/area_specs/volume.md
+
+area: volume
+status: 분석 완료, 백테스트 대기
+
+# ─────────────────────────────────────────────────────
+# 점수 산출 — bear-only 레짐 적응 (±10 풀스케일)
+# ─────────────────────────────────────────────────────
+scoring:
+  method: bear_only_regime_adaptive
+  philosophy: "거래량은 하락/조정장 방어 신호. 강세장은 다른 영역 위임."
+
+  price_change_window: 5      # PC: 지난 5거래일 가격 변화
+  vol_high: 1.5               # rel_vol 과열 임계
+  vol_low: 0.7                # rel_vol 저조 임계
+
+  # 레짐별 신호
+  regime_signals:
+    강세지속: 0.0             # off (거래량 신호 무력)
+    강세약화: 0.0             # off
+    조정: bear               # Q2+Q3+OBV_contra
+    하락: bear               # 동일
+
+  # bear 신호 (하락·조정장) — 3 요소 평균, ±10 클립
+  bear_components:
+    Q2:
+      cond: "ret_5 > 0 AND rel_vol < 0.7"
+      score: -10.0
+      meaning: "관심 식은 상승 = 하락 전조"
+    Q3:
+      cond: "ret_5 < 0 AND rel_vol > 1.5"
+      score: -10.0
+      meaning: "투매"
+    OBV_contra:
+      formula: "clip(-1 * 10 * tanh(z(OBV_5d_slope)), -10, 10)"
+      meaning: "OBV 식은 종목 반등 기대 (하락 베팅 반대)"
+    combine: "clip((Q2 + Q3 + OBV_contra) / 3, -10, 10)"
+
+  output_range: [-10.0, 10.0]
+  coverage: 0.36              # 하락·조정장에서만 베팅
+  min_rows_required: 25
+
+# ─────────────────────────────────────────────────────
+# quickregime — 거래량 전용 레짐 판별기 (추세/모멘텀과 다름!)
+# ─────────────────────────────────────────────────────
+quickregime:
+  note: "거래량은 강세장 오분류 최소화 위해 추세 영역보다 빠른 레짐 감지 필요"
+  breadth_lookback: 3         # vs 추세 영역 10 (빠름)
+  breadth_horizon: 5          # vs 추세 영역 10
+  high_threshold: 0.52        # vs 추세 영역 0.60 (강세 빨리 인정)
+  low_threshold: 0.40
+  trend_lookback: 5
+
+  classification: |
+    breadth(t) = 지난 3거래일 × 67종목의 5일 backward 수익률 양수 비율
+    trend(t)   = breadth(t) - breadth(t-5)
+    breadth > 0.52: 강세지속(trend>=0) / 강세약화(trend<0)  → bear OFF
+    breadth < 0.40: 하락                                    → bear ON
+    else:           조정                                    → bear ON
+
+# ─────────────────────────────────────────────────────
+# 검증 성능
+# ─────────────────────────────────────────────────────
+performance:
+  evaluation_window: "2025-05-28 ~ 2026-05-28"
+  evaluation_horizon: 5
+  bench_pos_ratio: 0.565
+
+  bear_only:
+    realistic_hit: 0.546
+    vs_bench_pp: -1.8
+    coverage: 0.36
+  bull_2026_04_vs_bench_pp: -1.4   # 강세장 거의 손실 없음
+  bear_2026_05_vs_bench_pp: 8.2    # 하락장 알파
+
+  comparison:
+    regime_full_vs_bench_pp: -6.7   # bull 활성 (강세장 폭망)
+    Q1_static_vs_bench_pp: 0.3      # 강세 항상 (저변동)
+    vol_baseline_vs_bench_pp: -4.5  # 기존 모델 (상대량+OBV 상시)
+
+# ─────────────────────────────────────────────────────
+# 제외 / 미사용
+# ─────────────────────────────────────────────────────
+excluded:
+  rel_vol_standalone:
+    reason: "방향 없음 (높은 거래량 = 매수일수도 매도일수도). IC ~0."
+  AD_Line_Chaikin_standalone:
+    reason: "money flow 지만 단독 IC ~0. 가격 결합 필요."
+  Q1_bull_signal:
+    reason: "강세장 bench 0.72 라 거래량 선별 무력. bull off 가 정답."
+    note: "강세장은 5영역 결합에서 추세/모멘텀이 채움."
+
+# ─────────────────────────────────────────────────────
+# 한계
+# ─────────────────────────────────────────────────────
+caveats:
+  - "전체 -1.8pp. 거래량 가치는 순수 하락/조정장 한정 (+8pp)"
+  - "하락장 표본 적음 (2026-05, 2026-03). turning point 2~3건"
+  - "quickregime lookback=3 도 강세장 일부 오분류 (-1.4 잔여)"
+  - "실거래 (entry/exit/cost) 미연계"

@@ -1,0 +1,89 @@
+# Area 5 — Wyckoff (심리·국면) 영역 spec
+# 작성: 2026-05-30 Kane & 클로이 (M4 분석)
+# 출처: docs/area_specs/wyckoff.md
+
+area: wyckoff
+status: 분석 완료, 백테스트 대기
+type: event_based   # ★ 다른 4영역(연속 점수)과 다름
+
+# ─────────────────────────────────────────────────────
+# 신호 — 국면 전환 이벤트 (이벤트 기반, 연속 점수 아님)
+# ─────────────────────────────────────────────────────
+signal:
+  method: phase_transition_event
+  source: hillstorm detect_signals (Signal 컬럼)
+  philosophy: "국면 상태/심리 지표가 아니라 국면 전환 이벤트가 가치."
+
+  entry:
+    signal: ACC_COMPLETE
+    condition: "최근 N일 70%+ Accumulation + Hope_Vector 양전환"
+    action: "다음날 시가 매수"
+  exit:
+    signal: DIST_CONFIRM
+    condition: "최근 N일 70%+ Distribution + Hope_Vector 음전환"
+    action: "다음날 시가 매도"
+
+  unused_signals:
+    MARKUP_WATCH: "Markup 중 Hope MA5 3일↓ — 청산 후보 (미채택)"
+    MARKDOWN_WATCH: "Markdown 중 공포 소진 — 매수 준비 (미채택)"
+    PANIC_ZONE: "Hope<-0.08 + RelVol>2.5 — h=5 50% 무신호"
+
+# ─────────────────────────────────────────────────────
+# 검증 성능 (다음날 시가 체결)
+# ─────────────────────────────────────────────────────
+performance:
+  evaluation_window: "2025-05-28 ~ 2026-05-28"
+  fill: next_day_open
+
+  closed_trades:
+    n: 38
+    hit_rate: 0.895
+    avg_return_pct: 20.30
+    median_return_pct: 13.40
+    avg_hold_days: 70
+    max_pct: 204.5
+    min_pct: -5.7
+  all_trades:
+    n: 69
+    hit_rate: 0.797      # ★ 정직한 수치 (미청산 31건 중 10건 마이너스 포함)
+    avg_return_pct: 32.68
+
+  return_distribution_closed:
+    loss_lt0: 0.105      # 최악 -5.7%
+    gain_0_10: 0.289
+    gain_gt10: 0.605
+
+  comparison:
+    phase_state_markup_markdown: 0.557   # 국면 상태 매매 hit_rate
+    phase_transition_acc_dist: 0.797     # 전환 이벤트 매매
+
+# ─────────────────────────────────────────────────────
+# 핵심 발견
+# ─────────────────────────────────────────────────────
+findings:
+  - "평가 방식이 결론 뒤집음: 횡단면 hit -3~-6.5pp(부적합) vs 거래사이클 79.7%"
+  - "국면 전환 이벤트(ACC→DIST) >> 국면 상태(Markup→Markdown) (79.7% vs 55.7%)"
+  - "심리 4지표(Hope/Anxiety/Confidence/Energy)는 거래량/방향 중복 — 제외"
+  - "  Confidence=(종가-시가)/시가, Energy=상대거래량, Hope=둘의 곱, Anxiety=변동폭×방향"
+  - "  → 부호가 그날 몸통 방향 하나로 결정 → 점수 동일 (거래량 영역 재포장)"
+  - "ACC_COMPLETE 진입은 바닥 잡음 (청산 손실 최악 -5.7%)"
+
+# ─────────────────────────────────────────────────────
+# 한계
+# ─────────────────────────────────────────────────────
+caveats:
+  - "청산 신호(DIST_CONFIRM) 지연 — 안 떠서 장기 보유 시 손실 (카카오 -34%, 알테오젠 -16%)"
+  - "손절은 hillstorm(longlivevault) 신호 로직 조정 영역 — 본 분석 밖"
+  - "표본 적음 (청산완료 38건). 89.5%는 생존편향, 전체 79.7%가 정직"
+  - "강세장 효과 — hit 79.7% 가 시장 덕인지 분리 불가 (단 청산손실 거의 없음)"
+  - "연속 점수(±10) 아닌 이벤트 신호 — 5영역 결합 시 점수화/게이트 별도 설계"
+
+# ─────────────────────────────────────────────────────
+# 5영역 결합 시 통합 과제
+# ─────────────────────────────────────────────────────
+integration_note: |
+  다른 4영역은 매일 ±10 연속 점수. Wyckoff 는 전환일만 이벤트.
+  옵션:
+  (a) ACC_COMPLETE=+10 / DIST_CONFIRM=-10 / 보유구간=+α 로 이벤트→점수 변환
+  (b) 진입/청산 타이밍 게이트로 별도 레이어 (점수 합산 아님)
+  5영역 결합 단계에서 설계 결정.

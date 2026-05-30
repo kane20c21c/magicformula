@@ -1,0 +1,97 @@
+# active_strategy_v2.yaml — 5영역 결합 시스템 (M4 분석 확정)
+# 작성: 2026-05-30 Kane & 클로이
+# ★ 구버전 active_strategy.yaml 과 구조 완전히 다름 (계산방법 교체)
+#   - 구: scorer.py 5영역 가중평균 + composite_score + R1
+#   - 신: area_scores.compute_combined_score (영역별 레짐 + Wyckoff 게이트)
+# 데일리 트랙 포팅 전까지는 분석 트랙 전용. (docs/HANDOFF_PORTING.md 참조)
+
+strategy_id: COMBINED-v2-2026-05
+last_updated: '2026-05-30'
+source_analysis: docs/area_specs/combined.md
+system_version: v2_combined   # 데일리 코드가 분기 판단용
+
+# ─────────────────────────────────────────────────────
+# 종목 점수 — 4영역 robust 가중 결합 + Wyckoff 게이트
+# ─────────────────────────────────────────────────────
+scoring:
+  method: combined_5area     # area_scores.compute_combined_score
+  weights:                   # robust 그리드 최적 (T20/M20/Vu0/Va60)
+    trend: 0.2
+    momentum: 0.2
+    volume: 0.0
+    volatility: 0.6
+  threshold: 6.0             # 확정 (5.0 후보)
+  candidate_threshold: 5.0
+
+  # 영역별 레짐 판별기 (★ 영역마다 다름)
+  regimes:
+    trend:                   # breadth
+      breadth_lookback: 10
+      breadth_horizon: 10
+      high_threshold: 0.60
+      low_threshold: 0.40
+      trend_lookback: 5
+    volume_volatility:       # quickregime
+      breadth_lookback: 3
+      breadth_horizon: 5
+      high_threshold: 0.52
+      low_threshold: 0.40
+      trend_lookback: 5
+
+  # Wyckoff 국면 게이트
+  gate:
+    enabled: true
+    exclude_phases: [Markdown]   # 매수 제외
+    source: hillstorm.classify_wyckoff
+
+# ─────────────────────────────────────────────────────
+# 영역별 신호 spec (상세는 docs/area_specs/*.md)
+# ─────────────────────────────────────────────────────
+areas:
+  trend:      Dv2(정30/크30/기40) + invert_dist_off_bull
+  momentum:   RSI 10/90 극단 trend 단독
+  volume:     bear-only Q2+Q3+OBV_contra (강세장 0)
+  volatility: BB×52주×레짐 결합 점수표
+
+# ─────────────────────────────────────────────────────
+# 매매 규칙
+# ─────────────────────────────────────────────────────
+trading:
+  entry:
+    rule: threshold_breakout    # prev <= thr < today
+    fill: next_day_open
+    position_size: 10_000_000   # 종목당 1000만원 상한
+    one_position_per_ticker: true
+  exit:
+    stop_loss: "종가 < 진입가 − ATR(14)×1 → 다음날 시가"
+    time_stop: "보유 20거래일 + 누적손익 <= 0% → 다음날 시가"
+    hold_if_profit: "누적손익 > 0% 면 시간청산 안 함"
+    force_exit: "평가종료일 종가"
+
+# ─────────────────────────────────────────────────────
+# 백테스트 성능 (2025-06-01 ~ 2026-05-29, in-sample 강세장)
+# ─────────────────────────────────────────────────────
+performance:
+  trades: 73
+  avg_return_pct: 85.2
+  total_pnl_eok: 6.22
+  robust_ex_top5_pct: 51.2
+  hit_rate: 54.8
+  avg_hold_days: 8
+  vs_baseline_pct: "+41pp (베이스라인 평균수익 44.2%)"
+
+caveats:
+  - "in-sample only (강세장 1년). out-of-sample 검증 생략 (시장 특수성)"
+  - "거래비용/자본제약 미반영. 종목universe 확장으로 robust성 보강 예정"
+  - "Vu=0 (거래량 강세장 0). 하락장 길어지면 재평가"
+
+# ─────────────────────────────────────────────────────
+# 구버전 참고 (베이스라인, 데일리 현재 운영 중)
+# ─────────────────────────────────────────────────────
+legacy_baseline:
+  file: configs/active_strategy.yaml
+  strategy_id: CompR15
+  weights: {trend: 0.30, momentum: 0.15, volume: 0.10, volatility: 0.25, wyckoff: 0.20}
+  rule: R1
+  threshold: 5.0
+  note: "Mac.Mini 데일리가 현재 이걸로 운영 중. 포팅 완료 전까지 유지."

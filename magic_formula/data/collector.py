@@ -91,8 +91,15 @@ def _date_range(months: int = 18) -> tuple[str, str]:
 
 def _vault_df_to_indexed(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     """
-    vault 반환값(컬럼: Date, Ticker, Open, High, Low, Close, Volume, ...) 을
-    Magic Formula 표준(DatetimeIndex + OHLCV) 으로 변환.
+    vault 반환값(컬럼: Date, Ticker, Open, High, Low, Close, Volume + 지표/Wyckoff) 을
+    Magic Formula 표준(DatetimeIndex + 전체 컬럼) 으로 변환.
+
+    ★ 2026-05-31 변경 (v2_combined 포팅): 컬럼 whitelist → passthrough.
+       vault 가 채워준 모든 컬럼(Rel_Volume, AD_Line, BB_upper/lower, Hope_Vector,
+       Wyckoff_Label/Signal/Signal_Strength 등) 을 그대로 통과시킨다. 구버전
+       소비자(scorer.compute_scores 등) 는 OHLCV 5컬럼만 참조하므로 추가 컬럼이
+       와도 무시되어 영향 없음. v2 (area_scores.compute_combined_score) 는 LLV
+       가 채운 지표·Wyckoff 컬럼을 직접 읽음.
     """
     if df is None or df.empty:
         return pd.DataFrame()
@@ -107,17 +114,16 @@ def _vault_df_to_indexed(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame
     elif not isinstance(df.index, pd.DatetimeIndex):
         return pd.DataFrame()
 
-    # OHLCV 5개 컬럼만 유지 (지수는 Volume 없을 수 있어 4개만 남는 케이스 OK)
-    keep = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
-    if not keep:
+    # OHLCV 최소 컬럼 존재 검증 (없으면 빈 DataFrame — 지수는 Volume 없을 수 있어 조건부)
+    ohlcv_min = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
+    if not ohlcv_min:
         return pd.DataFrame()
-    df = df[keep].copy()
 
-    # 숫자 변환
-    for col in df.columns:
+    # OHLCV 수치 변환 (다른 컬럼은 dtype 보존 — Wyckoff_Label/Signal 은 str/object)
+    for col in ohlcv_min:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Volume 컬럼이 있으면 0인 행(비거래일) 제거 — 지수는 Volume 없을 수 있으므로 조건부
+    # Volume == 0 거래정지 행 제거 (지수 등 Volume 없는 경우는 스킵)
     if "Volume" in df.columns:
         df = df[df["Volume"] > 0]
 

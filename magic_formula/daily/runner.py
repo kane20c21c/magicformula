@@ -153,6 +153,12 @@ def run(
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # ── system_version 분기 (config.py 검증 전에 raw 로 확인) ──
+    # v2 yaml 은 구조가 달라 ActiveStrategy.from_dict 가 거부하므로 먼저 raw 읽기.
+    if _is_v2_config(config_path):
+        print("[daily.runner] system_version=v2_combined → 결합 시스템 경로")
+        return run_combined(target_date=target_date, config_path=config_path)
+
     from magic_formula.config import load_strategy
 
     cfg = load_strategy(config_path)
@@ -352,4 +358,337 @@ def _write_md(result: dict, path: Path) -> None:
         )
     lines += [""]
 
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# ===========================================================================
+# v2 — 5영역 결합 시스템 (M4 분석 확정, docs/area_specs/combined.md)
+# ===========================================================================
+# 데이터: LLV 가 채운 full-column OHLCV + Wyckoff_Label/Signal/Signal_Strength
+#        를 그대로 받아 쓴다. Magic Formula 는 hillstorm 을 import 하지 않는다.
+# 점수:  area_scores.compute_combined_score (영역별 레짐 + Markdown 게이트)
+# 신호:  종합점수 prev <= threshold < today 돌파
+# 산출:  daily_signal_YYYYMMDD.{json,md} — 기존 파일명 유지, 컬럼 확장
+
+_DEFAULT_CONFIG = _PROJ_ROOT / "configs" / "active_strategy.yaml"
+
+
+def _is_v2_config(config_path: str | None) -> bool:
+    """yaml 을 raw 로 읽어 system_version == 'v2_combined' 여부 판정."""
+    import yaml
+    path = Path(config_path) if config_path else _DEFAULT_CONFIG
+    if not path.exists():
+        return False
+    try:
+        d = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return str(d.get("system_version", "")).strip() == "v2_combined"
+    except Exception:
+        return False
+
+
+def _load_v2_config(config_path: str | None) -> dict:
+    """v2 yaml 파싱 (검증 없이 raw dict)."""
+    import yaml
+    path = Path(config_path) if config_path else _DEFAULT_CONFIG
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _v2_load_ohlcv_full(ticker: str, end_date: str):
+    """v2 — collector.fetch_ohlcv 로 vault full-column OHLCV 로드.
+
+    collector 가 vault 의 모든 컬럼(지표/Wyckoff) 을 그대로 통과시킴 (2026-05-31 변경).
+    Magic Formula 는 LLV 가 채운 컬럼을 받아 쓰기만 — hillstorm 직접 호출 없음.
+    """
+    from magic_formula.data.collector import fetch_ohlcv
+    start = (datetime.strptime(end_date, "%Y%m%d") - timedelta(days=500)).strftime("%Y%m%d")
+    df = fetch_ohlcv(ticker, start, end_date)
+    if df is None or df.empty or len(df) < 80:
+        return None
+    return df
+
+
+def _v2_phase_series(df: pd.DataFrame) -> pd.Series:
+    """LLV 가 채운 Wyckoff_Label 컬럼을 그대로 게이트 입력으로 반환.
+
+    없으면 빈 시리즈 → 게이트 NaN 매칭 (Markdown 아닌 것으로 처리되어 게이트 무력).
+    Magic Formula 는 hillstorm 을 import 하지 않는다 — LLV 책임.
+    """
+    if "Wyckoff_Label" in df.columns:
+        return df["Wyckoff_Label"]
+    warnings.warn(
+        "[daily.runner.v2] Wyckoff_Label 컬럼 없음 — LLV 백필이 안 됐을 가능성. "
+        "게이트가 무력화됩니다.",
+        stacklevel=2,
+    )
+    return pd.Series(index=df.index, dtype=object)
+
+
+def run_combined(
+    target_date: str | None = None,
+    config_path: str | None = None,
+) -> dict:
+    """
+    v2 결합 시스템 데일리 파이프라인.
+
+    1. 전 종목 full-column OHLCV 로드 (vault → collector — Wyckoff 포함)
+    2. Wyckoff_Label 게이트 시리즈 (LLV 가 채운 값)
+    3. make_regimes → breadth + quickregime (전 종목 횡단면)
+    4. compute_combined_score (robust 가중 + Markdown 게이트)
+    5. 신호: 종합점수 prev <= threshold < today
+    6. JSON + MD 저장 (기존 파일명 유지, Wyckoff_Signal/Strength 컬럼 추가)
+    """
+    from collections import Counter
+
+    from magic_formula.analysis import area_scores as A
+    from magic_formula.analysis.area_scores import COMBINED_WEIGHTS, COMBINED_THRESHOLD
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    raw = _load_v2_config(config_path)
+    sc = raw.get("scoring", {})
+    weights = sc.get("weights", COMBINED_WEIGHTS)
+    threshold = float(sc.get("threshold", COMBINED_THRESHOLD))
+    gate_cfg = sc.get("gate", {})
+    gate = bool(gate_cfg.get("enabled", True))
+    strategy_id = raw.get("strategy_id", "COMBINED-v2")
+    universe = (raw.get("scoring", {}).get("universe")
+                or raw.get("universe", "core_excl_split"))
+
+    executed_at = datetime.today().strftime("%Y%m%d")
+    if target_date is None:
+        target_date = executed_at
+
+    tickers = get_universe(universe)
+    if not tickers:
+        tickers = list(SECTOR_MAP.keys())
+    print(f"[daily.runner.v2] 실행={executed_at} 조회종료={target_date} "
+          f"universe={universe} ({len(tickers)}개) thr={threshold} gate={gate}")
+
+    # ── 1. 전 종목 로드 (레짐은 횡단면이라 전체 필요) ──
+    stock_data: dict[str, pd.DataFrame] = {}
+    for t in tickers:
+        df = _v2_load_ohlcv_full(t, target_date)
+        if df is not None:
+            stock_data[t] = df
+    print(f"[daily.runner.v2] 로드 완료: {len(stock_data)}종목")
+
+    if not stock_data:
+        print("[daily.runner.v2] ⚠ 처리된 종목 0개 — 종료")
+        return {}
+
+    # ── 2. Wyckoff 국면 (LLV 가 채운 컬럼) ──
+    phases = {t: _v2_phase_series(df) for t, df in stock_data.items()}
+
+    # ── 3. 레짐 ──
+    regime_b, regime_q = A.make_regimes(stock_data)
+
+    # ── 4~5. 종합점수 + 신호 ──
+    all_results: list[dict] = []
+    signals: list[dict] = []
+    last_dates: list = []
+
+    for t, df in stock_data.items():
+        comp = A.compute_combined_score(df, regime_b, regime_q, phases[t], weights, gate)
+        if comp.dropna().empty or len(comp) < 2:
+            continue
+        last_dates.append(df.index[-1])
+
+        st = A.score_trend(df, regime_b)
+        sm = A.score_momentum(df)
+        sv = A.score_volume(df, regime_q)
+        sp = A.score_volatility(df, regime_q)
+
+        cur = comp.iloc[-1]
+        prv = comp.iloc[-2]
+        # 게이트 제외(NaN)면 신호/점수 없음
+        cur_v = float(cur) if pd.notna(cur) else None
+        prv_v = float(prv) if pd.notna(prv) else None
+        is_signal = bool(prv_v is not None and cur_v is not None
+                         and prv_v <= threshold < cur_v)
+
+        phase_now = phases[t].iloc[-1] if len(phases[t]) else ""
+
+        # Wyckoff 전환 신호 + 강도 (LLV 가 채운 컬럼 — 평소 None)
+        wy_sig = (df["Wyckoff_Signal"].iloc[-1]
+                  if "Wyckoff_Signal" in df.columns else None)
+        wy_str = (df["Wyckoff_Signal_Strength"].iloc[-1]
+                  if "Wyckoff_Signal_Strength" in df.columns else None)
+        if pd.isna(wy_sig):
+            wy_sig = None
+        if pd.isna(wy_str):
+            wy_str = None
+        else:
+            try:
+                wy_str = int(wy_str)
+            except (ValueError, TypeError):
+                wy_str = None
+
+        name = get_ticker_name(t, df.iloc[-1].get("Name") if "Name" in df.columns else None)
+        sector = SECTOR_MAP.get(t, "기타")
+
+        row = {
+            "ticker": t, "name": name, "sector": sector,
+            "composite_score": round(cur_v, 2) if cur_v is not None else None,
+            "prev_score": round(prv_v, 2) if prv_v is not None else None,
+            "area1_trend": round(float(st.iloc[-1]), 2),
+            "area2_momentum": round(float(sm.iloc[-1]), 2),
+            "area3_volume": round(float(sv.iloc[-1]), 2),
+            "area4_volatility": round(float(sp.iloc[-1]), 2),
+            "area5_wyckoff": 0.0,                 # v2 는 Wyckoff 점수 미사용 (게이트로)
+            "wyckoff_phase": str(phase_now) if phase_now and pd.notna(phase_now) else "",
+            "wyckoff_signal": str(wy_sig) if wy_sig else "",
+            "wyckoff_signal_strength": wy_str,
+            "gated_out": bool(cur_v is None),     # Markdown 등으로 제외됨
+            "is_signal": is_signal,
+            **_v2_prev_day_info(df),
+        }
+        all_results.append(row)
+        if is_signal:
+            signals.append(row)
+
+    # 정렬
+    def sk(r):
+        try:
+            return SECTOR_ORDER.index(r["sector"])
+        except ValueError:
+            return 999
+    signals.sort(key=lambda r: (sk(r), r["sector"], r["ticker"]))
+    all_results.sort(key=lambda r: (sk(r), r["sector"], r["ticker"]))
+
+    data_date = (Counter(last_dates).most_common(1)[0][0].strftime("%Y%m%d")
+                 if last_dates else executed_at)
+
+    result = {
+        "date": data_date, "executed_at": executed_at,
+        "strategy_id": strategy_id, "rule": "threshold_breakout",
+        "threshold": threshold, "weights": dict(weights),
+        "system_version": "v2_combined", "gate": gate,
+        "total_tickers": len(all_results), "signal_count": len(signals),
+        "signals": signals, "all_scores": all_results,
+    }
+
+    json_path = OUTPUT_DIR / f"daily_signal_{data_date}.json"
+    md_path = OUTPUT_DIR / f"daily_signal_{data_date}.md"
+    json_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, default=_json_default),
+        encoding="utf-8")
+    print(f"[daily.runner.v2] JSON 저장: {json_path}")
+    _write_md_v2(result, md_path)
+    print(f"[daily.runner.v2] MD 저장:   {md_path}")
+    return result
+
+
+def _v2_prev_day_info(df: pd.DataFrame) -> dict:
+    """v2 — 전일 OHLCV 정보 (df 는 raw OHLCV 인덱스)."""
+    if len(df) < 2:
+        return {}
+    today = df.iloc[-1]; prev = df.iloc[-2]
+    close = float(today["Close"]); pv = int(prev["Volume"]) if "Volume" in df else 0
+    vol = int(today["Volume"]) if "Volume" in df else 0
+    return {
+        "open": float(today["Open"]), "high": float(today["High"]),
+        "low": float(today["Low"]), "close": close, "volume": vol,
+        "change_pct": round((close - prev["Close"]) / prev["Close"] * 100, 2) if prev["Close"] else 0.0,
+        "vol_chg_pct": round((vol - pv) / pv * 100, 2) if pv else 0.0,
+    }
+
+
+def _phase_short(label: str) -> str:
+    """국면 라벨 → 4글자 약어 (md 표 가독성)."""
+    mapping = {
+        "Accumulation": "Accum",
+        "Markup": "Markup",
+        "Distribution": "Dist",
+        "Markdown": "Mark↓",
+    }
+    return mapping.get(label, label[:6] if label else "")
+
+
+def _signal_short(sig: str, strength) -> str:
+    """전환 신호 + 강도 → 표 셀 텍스트.
+
+    예: ACC_COMPLETE strength=2 → 'ACC↑(2)'
+        DIST_CONFIRM strength=3 → 'DIST↓(3)'
+        평소 None → ''
+    """
+    if not sig:
+        return ""
+    label_map = {
+        "ACC_COMPLETE":    "ACC↑",
+        "DIST_CONFIRM":    "DIST↓",
+        "MARKUP_WATCH":    "MU↘",
+        "MARKDOWN_WATCH":  "MD↗",
+        "PANIC_ZONE":      "PANIC",
+    }
+    short = label_map.get(sig, sig[:6])
+    if strength is not None:
+        return f"{short}({strength})"
+    return short
+
+
+def _write_md_v2(result: dict, path: Path) -> None:
+    """v2 결과 → Markdown.
+
+    표 컬럼 순서 (Kane 지시 2026-05-31):
+      종목 | 국면 | 전환신호 | 종합점수 | 추세 | 모멘텀 | 거래량 | 변동성 | 종가 | 등락 | 거래량변동
+    국면은 게이트 역할이므로 점수 앞에 배치. 전환신호는 5종(ACC/DIST/MU/MD/PANIC) 모두 기록.
+    """
+    d = datetime.strptime(result["date"], "%Y%m%d")
+    date_ko = f"{d.year}.{d.month:02d}.{d.day:02d}"
+    w = result["weights"]
+    lines = [
+        f"# 황금률 진입신호 리포트 (v2 결합) — {date_ko}", "",
+        f"- **진입 신호**: {result['signal_count']}종목",
+        f"- **전략**: {result['strategy_id']} (threshold={result['threshold']:.1f}, "
+        f"게이트={'ON' if result['gate'] else 'OFF'})",
+        f"- **가중치**: T={w.get('trend',0)*100:.0f}% M={w.get('momentum',0)*100:.0f}% "
+        f"Vu={w.get('volume',0)*100:.0f}% Va={w.get('volatility',0)*100:.0f}%",
+        f"- **대상 종목**: {result['total_tickers']}개", "",
+    ]
+
+    # 진입 신호 표 (섹터별 그룹)
+    if result["signals"]:
+        lines += ["## 📈 진입 신호 종목", ""]
+        # 섹터별 그룹화
+        from itertools import groupby
+        for sector, rows in groupby(result["signals"], key=lambda r: r["sector"]):
+            rows = list(rows)
+            lines += [
+                f"### [{sector}]", "",
+                "| 종목 | 국면 | 전환신호 | 종합점수 | 추세 | 모멘텀 | 거래량 | 변동성 | 종가 | 등락 | 거래량변동 |",
+                "|------|------|---------|---------|------|--------|--------|--------|------|------|-----------|",
+            ]
+            for s in rows:
+                chg = s.get("change_pct", 0)
+                vol_chg = s.get("vol_chg_pct", 0)
+                lines.append(
+                    f"| {s['name']}({s['ticker']}) "
+                    f"| {_phase_short(s.get('wyckoff_phase',''))} "
+                    f"| {_signal_short(s.get('wyckoff_signal',''), s.get('wyckoff_signal_strength'))} "
+                    f"| **{s['composite_score']:.2f}** "
+                    f"| {s['area1_trend']:.1f} | {s['area2_momentum']:.1f} "
+                    f"| {s['area3_volume']:.1f} | {s['area4_volatility']:.1f} "
+                    f"| {s.get('close','-'):,.0f} "
+                    f"| {'+' if chg>=0 else ''}{chg:.1f}% "
+                    f"| {'+' if vol_chg>=0 else ''}{vol_chg:.0f}% |"
+                )
+            lines += [""]
+    else:
+        lines += ["## 📭 오늘 진입 신호 없음", ""]
+
+    # 전체 종목 현황
+    lines += ["## 전체 종목 현황", "",
+              "| 섹터 | 종목 | 국면 | 전환신호 | 종합점수 | 추세 | 모멘텀 | 거래량 | 변동성 |",
+              "|------|------|------|---------|---------|------|--------|--------|--------|"]
+    for r in result["all_scores"]:
+        mark = " 🔔" if r["is_signal"] else (" ⛔" if r.get("gated_out") else "")
+        cs = f"{r['composite_score']:.2f}" if r["composite_score"] is not None else "—(게이트)"
+        lines.append(
+            f"| {r['sector']} | {r['name']}({r['ticker']}){mark} "
+            f"| {_phase_short(r.get('wyckoff_phase',''))} "
+            f"| {_signal_short(r.get('wyckoff_signal',''), r.get('wyckoff_signal_strength'))} "
+            f"| {cs} "
+            f"| {r['area1_trend']:.1f} | {r['area2_momentum']:.1f} "
+            f"| {r['area3_volume']:.1f} | {r['area4_volatility']:.1f} |"
+        )
+    lines += [""]
     path.write_text("\n".join(lines), encoding="utf-8")

@@ -1,0 +1,106 @@
+# Area 1 — 추세 (Trend) 영역 spec
+# 작성: 2026-05-29 Kane & 클로이 (M4 분석)
+# 출처: docs/area_specs/trend.md
+
+area: trend
+status: 분석 완료, 백테스트 대기
+
+# ─────────────────────────────────────────────────────
+# 점수 산출
+# ─────────────────────────────────────────────────────
+scoring:
+  method: Dv2_3_3_4
+  function: magic_formula.analysis.trend_variants.score_D_v2
+
+  # Sub-component 가중치 (합 = 1.0)
+  weights:
+    align: 0.30      # 정배열 (MA5/20/60)
+    cross: 0.30      # 골든/데드 크로스
+    slope: 0.40      # MA60 기울기
+
+  # Sub-component 구현 (A 변형 — sub cap ±10)
+  sub_components:
+    align:
+      function: magic_formula.analysis.trend_variants._align_A
+      caps: [-10, 10]
+    cross:
+      function: magic_formula.analysis.trend_variants._cross_A
+      caps: [-10, 10]
+      ffill_days: 5
+    slope:
+      function: magic_formula.analysis.trend_variants._slope_A
+      multiplier: 50    # MA60 5일 변화율 % × 50
+      caps: [-10, 10]
+
+  output_range: [-10.0, 10.0]
+  min_rows_required: 65   # MA60 + 5일 기울기 여유
+
+# ─────────────────────────────────────────────────────
+# 레짐 판별기
+# ─────────────────────────────────────────────────────
+regime_detector:
+  method: breadth_with_trend
+  function: magic_formula.analysis.ic_framework.compute_breadth_series
+
+  breadth_lookback: 10      # 윈도우 크기 (거래일)
+  breadth_horizon: 10       # 각 점의 측정 간격 (10일 backward 수익률)
+  breadth_trend_lookback: 5  # breadth 변화량 계산 lookback
+
+  thresholds:
+    high: 0.60   # > high → 강세
+    low: 0.40    # < low → 하락
+
+  # 4-mode 분류 로직 (의사 코드)
+  classifier_logic: |
+    if breadth > 0.60:
+        return "강세지속" if breadth_trend >= 0 else "강세약화"
+    if breadth < 0.40:
+        return "하락"
+    return "조정"
+
+# ─────────────────────────────────────────────────────
+# 신호 처리 (적응형 변환)
+# ─────────────────────────────────────────────────────
+adaptive_signal:
+  mode: invert_dist_off_bull
+  rules:
+    강세지속: off       # score = 0 (베팅 안 함)
+    강세약화: invert    # score × -1 (Distribution 의심 → 반전)
+    조정: pass          # 점수 그대로
+    하락: pass          # 점수 그대로
+
+# ─────────────────────────────────────────────────────
+# 검증 성능 (참고용)
+# ─────────────────────────────────────────────────────
+performance:
+  evaluation_window: "2025-05-28 ~ 2026-05-28"
+  evaluation_horizon: 10  # 거래일
+
+  overall:
+    bench_pos_ratio: 0.591   # no-signal long-all
+    realistic_hit: 0.570
+    vs_bench_pp: -2.1
+    coverage: 0.70
+
+  turning_points:
+    - month: "2025-11"
+      bench: 0.493
+      vs_bench_pp: 15.7
+    - month: "2026-05"
+      bench: 0.294
+      vs_bench_pp: 33.1
+
+  regime_distribution_days:
+    강세지속: 71
+    강세약화: 49
+    조정: 90
+    하락: 34
+
+# ─────────────────────────────────────────────────────
+# 한계
+# ─────────────────────────────────────────────────────
+caveats:
+  - "평균은 long-all 못 이김 (vs bench -2.1pp)"
+  - "turning point 2건에 alpha 의존 — overfitting 의심"
+  - "실제 거래 (entry/exit/cost) 시뮬레이션 미연계"
+  - "h=10 에 최적화 — h=5/20 일관성 부족"

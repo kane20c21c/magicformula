@@ -1,0 +1,68 @@
+# Area 2 — 모멘텀 (Momentum) 영역 spec
+# 작성: 2026-05-29 Kane & 클로이 (M4 분석)
+# 출처: docs/area_specs/momentum.md
+
+area: momentum
+status: 분석 완료, 백테스트 대기
+
+# ─────────────────────────────────────────────────────
+# 점수 산출 — RSI 극단 trend 단독
+# ─────────────────────────────────────────────────────
+scoring:
+  method: RSI_extreme_trend_only
+  indicator: RSI(14)
+  encoding: 5band_threshold
+  boundary: [10, 90]      # 극단 (어중간 30/70 아님 — 경계가 방향 결정)
+  direction: trend        # 과매수(RSI>=90) = + (추세 폭발)
+
+  # 5-band 점수 (±10 풀스케일, 추세와 통일)
+  bands:
+    extreme_high: {cond: "RSI >= 90", score: 10.0}
+    mild_high:    {cond: "80 <= RSI < 90", score: 5.0}
+    neutral:      {cond: "30 < RSI < 70", score: 0.0}   # 베팅 안 함
+    mild_low:     {cond: "20 < RSI <= 30", score: -5.0}
+    extreme_low:  {cond: "RSI <= 10", score: -10.0}
+
+  output_range: [-10.0, 10.0]
+  coverage: 0.147         # RSI 극단일 때만 베팅
+  min_rows_required: 35
+
+# ─────────────────────────────────────────────────────
+# 제외 지표
+# ─────────────────────────────────────────────────────
+excluded:
+  stoch_k:
+    reason: "모멘텀 내부 결합에서 RSI 대비 도움 안 됨 (레짐 적응해도 -1.2pp)"
+    note: "단 레짐 신호로서 0 아님 (하락/전환장 +5~8pp). 5영역 결합 단계 재검토."
+  macd:
+    reason: "동일 (-2.6pp). RSI 90+ 면 대부분 MACD 양수라 중복."
+    note: "MACD ≈ Hist (같은 계산). 레짐 신호로 5영역 결합 단계 재검토."
+
+# ─────────────────────────────────────────────────────
+# 검증 성능
+# ─────────────────────────────────────────────────────
+performance:
+  evaluation_window: "2025-05-28 ~ 2026-05-28"
+  evaluation_horizon: 3   # 거래일 (모멘텀 = 빠른 신호, h=3 최적)
+  bench_pos_ratio: 0.544  # no-signal long-all (h=3)
+
+  rsi_extreme_trend:
+    realistic_hit: 0.549
+    vs_bench_pp: 0.4
+    coverage: 0.147
+    betting_hit_rate: 0.573  # 베팅 구간만
+
+  # 비교 (레짐 적응 후)
+  stoch_adaptive_vs_bench_pp: -1.2
+  macd_adaptive_vs_bench_pp: -2.6
+
+  monthly_stability: "거의 모든 월 0~양수 (강세장 +0.5~1.7, 하락 +1.3)"
+
+# ─────────────────────────────────────────────────────
+# 한계
+# ─────────────────────────────────────────────────────
+caveats:
+  - "+0.4pp 작음. coverage 0.147 라 베팅 수 적어 신뢰구간 넓음"
+  - "RSI 극단 단조 개선 (0.512→0.573) 은 진짜 신호 특징이나 절대 우위 미미"
+  - "h=3 최적. h=5/10 으로 가면 bench 대비 악화"
+  - "실제 거래 (entry/exit/cost) 시뮬레이션 미연계"
