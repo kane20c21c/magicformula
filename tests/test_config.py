@@ -130,14 +130,29 @@ def test_dump_backups_history(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 현재 운영 yaml — 실제 active_strategy.yaml 로딩 가능한지
+# 레거시 v1 yaml — active_strategy_v1.yaml 로딩 가능한지
+#   2026-05-31: active_strategy.yaml 이 v2_combined 정본으로 승격되면서
+#   v1(scorer 가중평균 + R1) 스키마는 active_strategy_v1.yaml 백업으로 이동.
+#   config.py 의 ActiveStrategy 검증은 v1 스키마 전용이므로 v1 파일로 테스트.
 # ---------------------------------------------------------------------------
 
-def test_real_active_strategy_loads():
-    """저장소의 실제 active_strategy.yaml 이 검증을 통과해야 함."""
-    if not DEFAULT_CONFIG_PATH.exists():
-        pytest.skip(f"{DEFAULT_CONFIG_PATH} 없음 — 환경 의존 테스트 건너뜀")
-    cfg = load_strategy()
+def test_real_active_strategy_v1_loads():
+    """백업된 active_strategy_v1.yaml 이 v1 검증을 통과해야 함."""
+    v1_path = DEFAULT_CONFIG_PATH.parent / "active_strategy_v1.yaml"
+    if not v1_path.exists():
+        pytest.skip(f"{v1_path} 없음 — 환경 의존 테스트 건너뜀")
+    cfg = load_strategy(str(v1_path))
     cfg.validate()
     assert cfg.rule in {"R1", "R2", "R3", "ADAPTIVE"}
     assert cfg.area4_mode in {"trend", "contrarian"}
+
+
+def test_active_strategy_is_v2():
+    """운영 정본 active_strategy.yaml 이 v2_combined 인지 확인."""
+    if not DEFAULT_CONFIG_PATH.exists():
+        pytest.skip(f"{DEFAULT_CONFIG_PATH} 없음 — 환경 의존 테스트 건너뜀")
+    d = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert str(d.get("system_version", "")).strip() == "v2_combined", (
+        "active_strategy.yaml 이 v2_combined 정본이어야 함 "
+        "(v1 은 active_strategy_v1.yaml 백업)"
+    )

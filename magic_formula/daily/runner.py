@@ -560,6 +560,11 @@ def run_combined(
     data_date = (Counter(last_dates).most_common(1)[0][0].strftime("%Y%m%d")
                  if last_dates else executed_at)
 
+    # ── 레짐 시계열 사이드카 저장 ──
+    # 횡단면 레짐(breadth/quickregime)은 시장 전체 공통이라 코어 외 종목도
+    # 코어에서 산출된 이 값을 그대로 빌려 쓴다 (StockPortfolio 즉석 v2 계산).
+    _save_regimes(regime_b, regime_q, data_date)
+
     result = {
         "date": data_date, "executed_at": executed_at,
         "strategy_id": strategy_id, "last_updated": last_updated,
@@ -581,6 +586,37 @@ def run_combined(
     _write_md_v2(result, md_path)
     print(f"[daily.runner.v2] MD 저장:   {md_path}")
     return result
+
+
+def _regime_to_dict(ser: pd.Series) -> dict:
+    """레짐 Series(datetime index) → {YYYYMMDD: label} dict. NaN 제외."""
+    out: dict[str, str] = {}
+    for idx, val in ser.items():
+        if pd.isna(val):
+            continue
+        try:
+            key = idx.strftime("%Y%m%d")
+        except AttributeError:
+            key = str(idx)
+        out[key] = str(val)
+    return out
+
+
+def _save_regimes(regime_b: pd.Series, regime_q: pd.Series, data_date: str) -> None:
+    """횡단면 레짐 2종을 사이드카 JSON 으로 저장.
+
+    파일: output/signals/daily_regimes_{data_date}.json
+    소비자(StockPortfolio 즉석 v2)는 가장 최근 파일을 읽어 코어 외 종목 점수에
+    그대로 빌려 쓴다. 레짐은 시장 전체 공통이라 종목 무관.
+    """
+    path = OUTPUT_DIR / f"daily_regimes_{data_date}.json"
+    payload = {
+        "date": data_date,
+        "breadth": _regime_to_dict(regime_b),   # 추세 영역 (10/10/0.60)
+        "quick": _regime_to_dict(regime_q),     # 거래량·변동성 영역 (3/5/0.52)
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    print(f"[daily.runner.v2] 레짐 저장: {path}")
 
 
 def _v2_prev_day_info(df: pd.DataFrame) -> dict:
