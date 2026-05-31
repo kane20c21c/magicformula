@@ -447,9 +447,12 @@ def run_combined(
     sc = raw.get("scoring", {})
     weights = sc.get("weights", COMBINED_WEIGHTS)
     threshold = float(sc.get("threshold", COMBINED_THRESHOLD))
+    # 후보 임계값 — 진입 threshold(6.0) 보다 낮은 모니터링 기준 (보통 5.0)
+    candidate_threshold = float(sc.get("candidate_threshold", threshold))
     gate_cfg = sc.get("gate", {})
     gate = bool(gate_cfg.get("enabled", True))
     strategy_id = raw.get("strategy_id", "COMBINED-v2")
+    last_updated = raw.get("last_updated", "")
     universe = (raw.get("scoring", {}).get("universe")
                 or raw.get("universe", "core_excl_split"))
 
@@ -559,8 +562,11 @@ def run_combined(
 
     result = {
         "date": data_date, "executed_at": executed_at,
-        "strategy_id": strategy_id, "rule": "threshold_breakout",
-        "threshold": threshold, "weights": dict(weights),
+        "strategy_id": strategy_id, "last_updated": last_updated,
+        "rule": "threshold_breakout",
+        "threshold": threshold,
+        "candidate_threshold": candidate_threshold,   # 후보 모니터링 기준 (보통 5.0)
+        "weights": dict(weights),
         "system_version": "v2_combined", "gate": gate,
         "total_tickers": len(all_results), "signal_count": len(signals),
         "signals": signals, "all_scores": all_results,
