@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- com.stolab.magic-formula.daily-signal.plist
-     Magic Formula 데일리 시그널, 평일 20:40 KST 자동 실행.
+     Magic Formula 데일리 시그널, 평일 16:30 + 20:40 KST 하루 2회 자동 실행.
      vault 의 launchd 등록 방식을 따른다.
      등록/제거 명령은 configs/launchd/README.md 참고.
-     KST 20:40 시점은 longlivevault kis_update.py 의 2차 KIS 종가 배치(20:30) 직후로,
-     vault tickers parquet 에 당일 종가가 반영돼 있어 데일리 점수가 정확하다. -->
+
+     16:30 (1차판) — longlivevault kis_update.py 의 1차 KIS 종가 배치(16:00) 직후.
+         16:00 배치가 save_core → compute_indicators 로 당일 종가 기준 Wyckoff(국면/시그널)
+         까지 재계산해 core.parquet 에 적재한다. daily_signal 은 그 컬럼을 그대로 읽으므로
+         16:30 판에도 당일 종가 기준 Wyckoff 국면이 들어간다. 장 마감 직후 빠른 1차 신호.
+     20:40 (확정판) — kis_update.py 의 2차 KIS 종가 배치(20:30) 직후.
+         Wyckoff 계산 로직은 16:00 과 동일. 다만 KIS 종가가 20:30 에 확정 종가로 보정되면
+         그 입력 차이만큼 라벨이 달라질 수 있어 20:40 판이 최종본이다.
+         daily_signal_YYYYMMDD.{json,md} 를 덮어써 최종 확정.
+     파일명은 데이터 마지막 거래일 기준이라 두 실행이 같은 파일을 쓰며, 20:40 이 16:30 을 덮어쓴다. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -34,10 +42,37 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/kaneyoun/.pyenv/shims</string>
     </dict>
 
-    <!-- 평일 (월~금) 20:40 실행
+    <!-- 평일 (월~금) 16:30 + 20:40 하루 2회 실행
          launchd Weekday: 0/7=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토 -->
     <key>StartCalendarInterval</key>
     <array>
+        <!-- 16:30 잠정판 (월~금) -->
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>16</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>16</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>3</integer>
+            <key>Hour</key><integer>16</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>4</integer>
+            <key>Hour</key><integer>16</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>5</integer>
+            <key>Hour</key><integer>16</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <!-- 20:40 확정판 (월~금) -->
         <dict>
             <key>Weekday</key><integer>1</integer>
             <key>Hour</key><integer>20</integer>
