@@ -1,7 +1,7 @@
 """
 tests/test_config.py
 --------------------
-ActiveStrategy / load_strategy / dump_strategy / 검증 동작.
+StrategyV2 / load_strategy / update_strategy_fields / v2 가드 동작.
 """
 
 from __future__ import annotations
@@ -12,10 +12,11 @@ import pytest
 import yaml
 
 from magic_formula.config import (
-    ActiveStrategy,
     DEFAULT_CONFIG_PATH,
-    dump_strategy,
+    StrategyV2,
     load_strategy,
+    update_strategy_fields,
+    validate_dict,
 )
 
 
@@ -25,19 +26,28 @@ from magic_formula.config import (
 
 def _valid_dict():
     return {
-        "strategy_id": "Test",
-        "weights": {
-            "trend":      0.30,
-            "momentum":   0.20,
-            "volume":     0.20,
-            "volatility": 0.15,
-            "wyckoff":    0.15,
+        "strategy_id": "TEST-v2",
+        "last_updated": "2026-06-01",
+        "system_version": "v2_combined",
+        "scoring": {
+            "weights": {
+                "trend":      0.2,
+                "momentum":   0.2,
+                "volume":     0.0,
+                "volatility": 0.6,
+            },
+            "threshold": 6.0,
+            "candidate_threshold": 5.0,
+            "universe": "core_excl_split",
+            "gate": {"enabled": True, "exclude_phases": ["Markdown"]},
         },
-        "rule": "R1",
-        "area4_mode": "trend",
-        "threshold": 5.0,
-        "universe": "core_all",
+        "trading": {"entry": {"position_size": 10_000_000}},
     }
+
+
+def _write_yaml(path: Path, d: dict) -> None:
+    path.write_text(yaml.safe_dump(d, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -45,114 +55,130 @@ def _valid_dict():
 # ---------------------------------------------------------------------------
 
 def test_valid_dict_loads():
-    cfg = ActiveStrategy.from_dict(_valid_dict())
-    assert cfg.strategy_id == "Test"
-    assert cfg.rule == "R1"
-    assert cfg.area4_mode == "trend"
+    cfg = StrategyV2.from_dict(_valid_dict())
+    assert cfg.strategy_id == "TEST-v2"
+    assert cfg.threshold == 6.0
+    assert cfg.candidate_threshold == 5.0
+    assert cfg.gate_enabled is True
+    assert cfg.gate_exclude_phases == ("Markdown",)
+    assert cfg.position_size == 10_000_000
     assert abs(sum(cfg.weights.values()) - 1.0) < 1e-9
+
+
+def test_v1_schema_rejected():
+    """v1 스키마(system_version 없음)는 명확한 에러로 거부."""
+    v1 = {
+        "strategy_id": "CompR15",
+        "weights": {"trend": 0.3, "momentum": 0.15, "volume": 0.1,
+                    "volatility": 0.25, "wyckoff": 0.2},
+        "rule": "R1", "area4_mode": "trend",
+        "threshold": 5.0, "universe": "core_all",
+    }
+    with pytest.raises(ValueError, match="system_version"):
+        StrategyV2.from_dict(v1)
 
 
 def test_weights_sum_not_one_raises():
     d = _valid_dict()
-    d["weights"]["wyckoff"] = 0.05      # 합 0.90
+    d["scoring"]["weights"]["volatility"] = 0.5      # 합 0.90
     with pytest.raises(ValueError, match="합계가 1.0 아님"):
-        ActiveStrategy.from_dict(d)
+        StrategyV2.from_dict(d)
 
 
 def test_missing_weight_key_raises():
     d = _valid_dict()
-    del d["weights"]["wyckoff"]
+    del d["scoring"]["weights"]["volume"]
     with pytest.raises(ValueError, match="키 불일치"):
-        ActiveStrategy.from_dict(d)
+        StrategyV2.from_dict(d)
 
 
-def test_invalid_rule_raises():
+def test_wyckoff_weight_key_rejected():
+    """v1 잔재(wyckoff 가중치 키)는 extra 로 거부."""
     d = _valid_dict()
-    d["rule"] = "R99"
-    with pytest.raises(ValueError, match="허용값 아님"):
-        ActiveStrategy.from_dict(d)
+    d["scoring"]["weights"]["wyckoff"] = 0.0
+    with pytest.raises(ValueError, match="키 불일치"):
+        StrategyV2.from_dict(d)
 
 
-def test_invalid_area4_mode_raises():
+def test_threshold_not_number_raises():
     d = _valid_dict()
-    d["area4_mode"] = "weird"
-    with pytest.raises(ValueError, match="허용값 아님"):
-        ActiveStrategy.from_dict(d)
+    d["scoring"]["threshold"] = "six"
+    with pytest.raises(ValueError, match="숫자 아님"):
+        StrategyV2.from_dict(d)
 
 
-def test_validate_method_works():
-    cfg = ActiveStrategy.from_dict(_valid_dict())
-    cfg.validate()   # 정상 — 예외 없음
+def test_position_size_default_when_missing():
+    d = _valid_dict()
+    del d["trading"]
+    cfg = StrategyV2.from_dict(d)
+    assert cfg.position_size == 10_000_000
 
-    # 검증 실패 — mutate 후
-    cfg.weights["trend"] = 0.99
+
+# ---------------------------------------------------------------------------
+# load / update round-trip
+# ---------------------------------------------------------------------------
+
+def test_load_strategy_from_file(tmp_path: Path):
+    p = tmp_path / "s.yaml"
+    _write_yaml(p, _valid_dict())
+    cfg = load_strategy(p)
+    assert cfg.threshold == 6.0
+    assert cfg.universe == "core_excl_split"
+
+
+def test_update_strategy_fields_roundtrip(tmp_path: Path):
+    """weights/threshold 만 바뀌고 나머지 구조(게이트/trading)는 보존."""
+    p = tmp_path / "s.yaml"
+    _write_yaml(p, _valid_dict())
+
+    new_w = {"trend": 0.4, "momentum": 0.2, "volume": 0.0, "volatility": 0.4}
+    update_strategy_fields(
+        p, weights=new_w, threshold=5.0,
+        strategy_id="TEST-v2-NEW", backup_history=False,
+    )
+
+    cfg = load_strategy(p)
+    assert cfg.weights == new_w
+    assert cfg.threshold == 5.0
+    assert cfg.strategy_id == "TEST-v2-NEW"
+    # 비변경 필드 보존
+    assert cfg.gate_enabled is True
+    assert cfg.position_size == 10_000_000
+    assert cfg.universe == "core_excl_split"
+
+
+def test_update_strategy_fields_guards_v1(tmp_path: Path):
+    """v1 yaml 을 대상으로 하면 갱신을 거부한다 (덮어쓰기 사고 방지)."""
+    p = tmp_path / "v1.yaml"
+    _write_yaml(p, {
+        "strategy_id": "CompR15",
+        "weights": {"trend": 0.3, "momentum": 0.15, "volume": 0.1,
+                    "volatility": 0.25, "wyckoff": 0.2},
+        "rule": "R1", "area4_mode": "trend",
+        "threshold": 5.0, "universe": "core_all",
+    })
+    with pytest.raises(ValueError, match="system_version"):
+        update_strategy_fields(p, threshold=6.0, backup_history=False)
+
+
+def test_update_invalid_weights_rejected(tmp_path: Path):
+    p = tmp_path / "s.yaml"
+    _write_yaml(p, _valid_dict())
+    bad = {"trend": 0.9, "momentum": 0.2, "volume": 0.0, "volatility": 0.6}  # 합 1.7
     with pytest.raises(ValueError, match="합계가 1.0 아님"):
-        cfg.validate()
+        update_strategy_fields(p, weights=bad, backup_history=False)
 
 
 # ---------------------------------------------------------------------------
-# dump / load round-trip
+# 운영 정본 yaml — 환경 의존 (있을 때만)
 # ---------------------------------------------------------------------------
 
-def test_dump_and_load_roundtrip(tmp_path: Path):
-    cfg = ActiveStrategy.from_dict(_valid_dict())
-    out = tmp_path / "test.yaml"
-    dump_strategy(cfg, out, backup_history=False)
-
-    assert out.exists()
-    cfg2 = load_strategy(out)
-    assert cfg2.weights == cfg.weights
-    assert cfg2.rule == cfg.rule
-    assert cfg2.threshold == cfg.threshold
-    assert cfg2.area4_mode == cfg.area4_mode
-
-
-def test_dump_backups_history(tmp_path: Path):
-    """backup_history=True 면 기존 파일을 history/ 에 복사한다."""
-    target = tmp_path / "active_strategy.yaml"
-    history = tmp_path / "history"
-
-    # 모듈 상수 임시 변경 (history 디렉토리 위치)
-    import magic_formula.config as cfg_mod
-    orig_history = cfg_mod.HISTORY_DIR
-    cfg_mod.HISTORY_DIR = history
-    try:
-        cfg1 = ActiveStrategy.from_dict({**_valid_dict(), "last_updated": "2026-01-01"})
-        dump_strategy(cfg1, target, backup_history=False)   # 첫 저장 — 백업 없음
-
-        cfg2 = ActiveStrategy.from_dict({**_valid_dict(), "strategy_id": "Test2"})
-        dump_strategy(cfg2, target, backup_history=True)    # 두 번째 — cfg1 이 history 로
-
-        backup_files = list(history.glob("*.yaml"))
-        assert len(backup_files) >= 1, "백업 파일이 history 에 생성되어야 함"
-    finally:
-        cfg_mod.HISTORY_DIR = orig_history
-
-
-# ---------------------------------------------------------------------------
-# 레거시 v1 yaml — active_strategy_v1.yaml 로딩 가능한지
-#   2026-05-31: active_strategy.yaml 이 v2_combined 정본으로 승격되면서
-#   v1(scorer 가중평균 + R1) 스키마는 active_strategy_v1.yaml 백업으로 이동.
-#   config.py 의 ActiveStrategy 검증은 v1 스키마 전용이므로 v1 파일로 테스트.
-# ---------------------------------------------------------------------------
-
-def test_real_active_strategy_v1_loads():
-    """백업된 active_strategy_v1.yaml 이 v1 검증을 통과해야 함."""
-    v1_path = DEFAULT_CONFIG_PATH.parent / "active_strategy_v1.yaml"
-    if not v1_path.exists():
-        pytest.skip(f"{v1_path} 없음 — 환경 의존 테스트 건너뜀")
-    cfg = load_strategy(str(v1_path))
-    cfg.validate()
-    assert cfg.rule in {"R1", "R2", "R3", "ADAPTIVE"}
-    assert cfg.area4_mode in {"trend", "contrarian"}
-
-
-def test_active_strategy_is_v2():
-    """운영 정본 active_strategy.yaml 이 v2_combined 인지 확인."""
+def test_real_active_strategy_loads_as_v2():
+    """운영 정본 active_strategy.yaml 이 v2 로더를 통과해야 함."""
     if not DEFAULT_CONFIG_PATH.exists():
         pytest.skip(f"{DEFAULT_CONFIG_PATH} 없음 — 환경 의존 테스트 건너뜀")
-    d = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    assert str(d.get("system_version", "")).strip() == "v2_combined", (
-        "active_strategy.yaml 이 v2_combined 정본이어야 함 "
-        "(v1 은 active_strategy_v1.yaml 백업)"
-    )
+    cfg = load_strategy()
+    assert cfg.system_version == "v2_combined"
+    assert abs(sum(cfg.weights.values()) - 1.0) < 1e-6
+    assert cfg.position_size == 10_000_000   # yaml trading.entry 정본
+    validate_dict(cfg.raw)

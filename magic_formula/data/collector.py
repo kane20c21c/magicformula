@@ -96,10 +96,8 @@ def _vault_df_to_indexed(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame
 
     ★ 2026-05-31 변경 (v2_combined 포팅): 컬럼 whitelist → passthrough.
        vault 가 채워준 모든 컬럼(Rel_Volume, AD_Line, BB_upper/lower, Hope_Vector,
-       Wyckoff_Label/Signal/Signal_Strength 등) 을 그대로 통과시킨다. 구버전
-       소비자(scorer.compute_scores 등) 는 OHLCV 5컬럼만 참조하므로 추가 컬럼이
-       와도 무시되어 영향 없음. v2 (area_scores.compute_combined_score) 는 LLV
-       가 채운 지표·Wyckoff 컬럼을 직접 읽음.
+       Wyckoff_Label/Signal/Signal_Strength 등) 을 그대로 통과시킨다.
+       v2 (area_scores) 는 LLV 가 채운 지표·Wyckoff 컬럼을 직접 읽는다.
     """
     if df is None or df.empty:
         return pd.DataFrame()

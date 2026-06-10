@@ -35,7 +35,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from magic_formula.scoring.scorer import _obv, _clip
+from magic_formula.indicators import _obv, _clip
 
 _MIN_ROWS = 25
 _Z_LOOKBACK = 60

@@ -190,11 +190,14 @@ def compute_metrics(
     # -----------------------------------------------------------------------
     if n_trades == 0:
         result.update({
-            "avg_trade_return_pct": 0.0,
-            "win_rate_pct":         0.0,
-            "profit_factor":        0.0,
-            "avg_hold_days":        0.0,
-            "exit_reason_dist":     {},
+            "avg_trade_return_pct":         0.0,
+            "win_rate_pct":                 0.0,
+            "profit_factor":                0.0,
+            "avg_hold_days":                0.0,
+            "robust_total_pnl_krw":         0.0,
+            "robust_avg_trade_return_pct":  0.0,
+            "top5_pnl_share_pct":           None,
+            "exit_reason_dist":             {},
         })
     else:
         returns     = trades_df["return_pct"]
@@ -219,6 +222,20 @@ def compute_metrics(
         result["win_rate_pct"]         = round(win_rate, 2)
         result["profit_factor"]        = round(profit_factor, 4)
         result["avg_hold_days"]        = round(float(hold_days.mean()), 1)
+
+        # robust 지표 — 상위 5건(net_pnl) 제외 (소수 대박 의존도 점검, M4 방식)
+        if n_trades > 5:
+            ex_top5 = trades_df.drop(net_pnls.nlargest(5).index)
+            result["robust_total_pnl_krw"]        = round(float(ex_top5["net_pnl"].sum()), 0)
+            result["robust_avg_trade_return_pct"] = round(float(ex_top5["return_pct"].mean()), 4)
+            result["top5_pnl_share_pct"] = (
+                round(float(net_pnls.nlargest(5).sum() / net_pnls.sum() * 100.0), 1)
+                if net_pnls.sum() != 0 else None
+            )
+        else:
+            result["robust_total_pnl_krw"]        = round(float(net_pnls.sum()), 0)
+            result["robust_avg_trade_return_pct"] = round(float(returns.mean()), 4)
+            result["top5_pnl_share_pct"]          = None
 
         # 청산 사유 분포
         dist = trades_df["exit_reason"].value_counts().to_dict()

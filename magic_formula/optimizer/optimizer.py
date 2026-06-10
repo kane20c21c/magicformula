@@ -1,111 +1,87 @@
 """
 optimizer/optimizer.py
 ----------------------
-8개 가중치 조합 × 3개 진입 규칙(R1·R3·ADAPTIVE) = 24회 백테스트를 실행하고
-결과를 집계한다.
+v2_combined 가중치 그리드 백테스트 실행기.
 
-ADAPTIVE 규칙: 진입 신호 당일 직전 40거래일 점수 패턴으로 종목별 규칙(R1/R3/SKIP)을
-               동적으로 결정 (rolling 분류 — 정적 워밍업 분류 대체).
+M4 분석(2026-05-30, docs/area_specs/combined.md) 방법론의 repo 내 구현:
+4영역(T/M/Vu/Va) 가중치 그리드 × 임계값 조합을 전 종목에 대해 시뮬레이션하고
+robust(상위 5건 제외) 지표 기준으로 랭킹을 만든다.
 
-가중치 조합 구조 (설계 v3 — 규칙별 최적화)
--------------------------------------------
-R1 최적화 조합 (combination11~14): Volume↑, Wyckoff↓
-  - 임계 돌파형 종목에서 거래량 확인 강화, 와이코프 가중치 축소
-R3 최적화 조합 (combination21~24): Trend↑, Volume↓
-  - 계단형 추세 종목에서 추세 강도 강화, 거래량 가중치 축소
-각 그룹은 기준→1단계→2단계 순으로 해당 방향 변화, 역방향은 반대 조정.
+핵심 최적화
+-----------
+영역 점수는 가중치와 무관하므로 **종목당 1회만** 계산해 캐시하고,
+조합 루프에서는 가중 결합(combine_scores)만 반복한다.
+→ 56조합 × 2임계값 = 112회 실행이 영역 점수 1회 계산 비용에 수렴.
+
+변경 이력
+---------
+2026-06-10 v2 단일화: v1(5영역 scorer 가중평균 + R1/R3/ADAPTIVE) 그리드 폐기.
 """
 
 from __future__ import annotations
 
-import itertools
 import sys
 import traceback
+from itertools import product
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# 경로 설정 — Magic Formula 루트를 sys.path 에 추가 (P5a)
+# 경로 설정 — Magic Formula 루트를 sys.path 에 추가
 # ---------------------------------------------------------------------------
 
 _PROJ_ROOT = Path(__file__).parent.parent.parent          # Magic Formula/
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
-from magic_formula.data.collector import get_backtest_split, TICKERS
-from magic_formula.signals.adaptive_rule_selector import select_rules_for_backtest
+from magic_formula.analysis import area_scores as A                      # noqa: E402
+from magic_formula.data.collector import get_backtest_split             # noqa: E402
+from magic_formula.indicators import _atr                                # noqa: E402
+from magic_formula.metrics.metrics import compute_metrics                # noqa: E402
+from magic_formula.simulator.simulator import (                          # noqa: E402
+    CAPITAL_PER_TRADE, run_simulation, trades_to_df,
+)
 
-# ---------------------------------------------------------------------------
-# 종목 universe — _vault 가 vault path + CORE_TICKERS + EXCLUDE 를 단일화 (P3)
-# ---------------------------------------------------------------------------
-
-from magic_formula._vault import get_universe   # noqa: E402
-
-TICKER_LIST: list[str] = get_universe("core_excl_split")
-if not TICKER_LIST:
-    TICKER_LIST = sorted(TICKERS.keys())
-
-from magic_formula.scoring.scorer import BASIC_WEIGHTS, compute_scores
-from magic_formula.simulator.simulator import run_simulation, simulate_ticker, trades_to_df
-from magic_formula.metrics.metrics import compute_metrics
-
-# ---------------------------------------------------------------------------
-# 영역 키 순서 (고정)
-# ---------------------------------------------------------------------------
-
-AREAS = ("trend", "momentum", "volume", "volatility", "wyckoff")
+AREA_KEYS = A.AREA_KEYS   # ("trend", "momentum", "volume", "volatility")
 
 
 # ---------------------------------------------------------------------------
-# 8개 가중치 조합 (v3 — 규칙별 최적화)
+# 가중치 그리드
 # ---------------------------------------------------------------------------
 
-# 조합 코드 형식: T-M-V-P-W (각 영역 가중치 %, 합계 100)
-# R1 최적화: Volume↑ Wyckoff↓ (분석 결과: R1 수익률 ∝ V+, W-)
-# R3 최적화: Trend↑ Volume↓  (분석 결과: R3 수익률 ∝ T+, V-)
-
-_COMBO_SPECS = [
-    # label         T      M      V      P      W
-    ("C11_R1_base", 0.20,  0.22,  0.33,  0.13,  0.12),  # R1 기준
-    ("C12_R1_st1",  0.20,  0.20,  0.35,  0.15,  0.10),  # R1 1단계 (V↑↑ W↓↓)
-    ("C13_R1_st2",  0.20,  0.18,  0.37,  0.17,  0.08),  # R1 2단계 (V↑↑↑ W↓↓↓)
-    ("C14_R1_rev",  0.20,  0.24,  0.31,  0.11,  0.14),  # R1 역방향 (V↓ W↑)
-    ("C21_R3_base", 0.23,  0.22,  0.27,  0.13,  0.15),  # R3 기준
-    ("C22_R3_st1",  0.25,  0.20,  0.25,  0.15,  0.15),  # R3 1단계 (T↑↑ V↓↓)
-    ("C23_R3_st2",  0.27,  0.18,  0.23,  0.17,  0.15),  # R3 2단계 (T↑↑↑ V↓↓↓)
-    ("C24_R3_rev",  0.21,  0.24,  0.29,  0.11,  0.15),  # R3 역방향 (T↓ V↑)
-]
-
-# 가중치 합 검증
-for _spec in _COMBO_SPECS:
-    _total = sum(_spec[1:])
-    assert abs(_total - 1.0) < 1e-9, f"{_spec[0]} 가중치 합 오류: {_total}"
+def weights_label(weights: dict[str, float]) -> str:
+    """{trend:0.2,...} → 'T20/M20/Vu0/Va60' (update_strategy 가 파싱하는 정형)."""
+    return (f"T{round(weights['trend']*100)}"
+            f"/M{round(weights['momentum']*100)}"
+            f"/Vu{round(weights['volume']*100)}"
+            f"/Va{round(weights['volatility']*100)}")
 
 
-def generate_weight_combinations() -> list[dict]:
+def generate_weight_grid(step: float = 0.2) -> list[dict]:
     """
-    8개 가중치 조합 목록을 반환한다 (v3 — 규칙별 최적화 설계).
+    합이 1.0 인 4영역 가중치 조합 전수 생성.
+
+    step=0.2 → 56조합 (M4 그리드와 동일 해상도),
+    step=0.1 → 286조합 (정밀 탐색용).
 
     Returns
     -------
-    list of dict with keys:
-        label    : 조합 레이블 (C11_R1_base 등)
-        weights  : {area: weight}
+    list of {"label": "T20/M20/Vu0/Va60", "weights": {...}}
     """
+    n = round(1.0 / step)
     combos = []
-    for label, t, m, v, p, w in _COMBO_SPECS:
-        combos.append({
-            "label": label,
-            "weights": {
-                "trend":      t,
-                "momentum":   m,
-                "volume":     v,
-                "volatility": p,
-                "wyckoff":    w,
-            },
-        })
+    for t, m, vu in product(range(n + 1), repeat=3):
+        va = n - t - m - vu
+        if va < 0:
+            continue
+        w = {
+            "trend":      t * step,
+            "momentum":   m * step,
+            "volume":     vu * step,
+            "volatility": va * step,
+        }
+        combos.append({"label": weights_label(w), "weights": w})
     return combos
 
 
@@ -113,270 +89,234 @@ def generate_weight_combinations() -> list[dict]:
 # 전체 백테스트 실행기
 # ---------------------------------------------------------------------------
 
-RULES = ("R1", "R3", "ADAPTIVE")   # R2 제거 (R1과 실질 동일)
-
-
-def run_all(
-    raw_data:       dict[str, pd.DataFrame],
-    kospi_df:       Optional[pd.DataFrame],
-    warmup_months:  int = 12,
-    verbose:        bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    51조합 × 4규칙(R1·R2·R3·ADAPTIVE) 전체 백테스트를 실행한다.
-
-    Parameters
-    ----------
-    raw_data       : collect_all() 반환값 (ticker → OHLCV DataFrame)
-    kospi_df       : KOSPI OHLCV DataFrame (알파 계산용)
-    warmup_months  : 워밍업 개월 수 (기본 12)
-    verbose        : 진행 상황 출력 여부
-
-    Returns
-    -------
-    (all_trades_df, summary_df)
-    all_trades_df : 모든 거래 기록 (weight_label, rule 컬럼 포함)
-    summary_df    : 조합별 성과 요약 (알파 기준 정렬)
-    """
-    combos = generate_weight_combinations()
-    stock_tickers = [t for t in raw_data if t != "KOSPI"]
-
-    # 각 종목의 실거래 구간 결정 (가장 짧은 데이터 기준)
-    trade_start = None
-    trade_end   = None
-    for ticker in stock_tickers:
-        df = raw_data[ticker]
+def _trade_window(stock_data: dict[str, pd.DataFrame],
+                  warmup_months: int) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """전 종목 공통 실거래 구간 (시작 = max, 끝 = min)."""
+    trade_start = trade_end = None
+    for df in stock_data.values():
         _, t_idx = get_backtest_split(df, warmup_months)
         if len(t_idx) == 0:
             continue
-        ts = t_idx[0]
-        te = t_idx[-1]
+        ts, te = t_idx[0], t_idx[-1]
         trade_start = ts if trade_start is None else max(trade_start, ts)
         trade_end   = te if trade_end   is None else min(trade_end,   te)
-
     if trade_start is None:
         raise ValueError("실거래 구간이 없습니다. 데이터 기간을 확인하세요.")
+    return trade_start, trade_end
+
+
+def prepare_scoring_inputs(
+    stock_data: dict[str, pd.DataFrame],
+) -> tuple[dict, dict, dict, pd.Series, pd.Series]:
+    """
+    조합 루프 전에 종목당 1회만 계산하는 입력들.
+
+    Returns
+    -------
+    (areas_by_ticker, atr_by_ticker, phase_by_ticker, regime_b, regime_q)
+    """
+    regime_b, regime_q = A.make_regimes(stock_data)
+    areas_by_ticker: dict[str, dict] = {}
+    atr_by_ticker:   dict[str, pd.Series] = {}
+    phase_by_ticker: dict[str, pd.Series] = {}
+    for t, df in stock_data.items():
+        areas_by_ticker[t] = A.compute_area_scores(df, regime_b, regime_q)
+        atr_by_ticker[t]   = _atr(df["High"], df["Low"], df["Close"])
+        phase_by_ticker[t] = (df["Wyckoff_Label"] if "Wyckoff_Label" in df.columns
+                              else pd.Series(index=df.index, dtype=object))
+    return areas_by_ticker, atr_by_ticker, phase_by_ticker, regime_b, regime_q
+
+
+def build_scored_data(
+    stock_data:      dict[str, pd.DataFrame],
+    areas_by_ticker: dict,
+    atr_by_ticker:   dict,
+    phase_by_ticker: dict,
+    weights:         dict[str, float],
+    gate:            bool = True,
+    exclude_phases:  tuple[str, ...] = A.GATE_EXCLUDE_PHASES,
+) -> dict[str, pd.DataFrame]:
+    """캐시된 영역 점수 → 조합별 scored_data (simulator 입력)."""
+    scored: dict[str, pd.DataFrame] = {}
+    for t, df in stock_data.items():
+        comp = A.combine_scores(
+            areas_by_ticker[t], weights, phase_by_ticker[t],
+            gate=gate, exclude_phases=exclude_phases,
+        )
+        sdf = df[["Open", "High", "Low", "Close"]].copy()
+        sdf["composite_score"] = comp
+        sdf["atr14"] = atr_by_ticker[t]
+        scored[t] = sdf
+    return scored
+
+
+def run_all(
+    stock_data:        dict[str, pd.DataFrame],
+    kospi_df:          pd.DataFrame | None,
+    thresholds:        tuple[float, ...] = (5.0, 6.0),
+    step:              float = 0.2,
+    warmup_months:     int = 12,
+    gate:              bool = True,
+    exclude_phases:    tuple[str, ...] = A.GATE_EXCLUDE_PHASES,
+    capital_per_trade: float = CAPITAL_PER_TRADE,
+    weights_list:      list[dict] | None = None,
+    verbose:           bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    가중치 그리드 × 임계값 전체 백테스트.
+
+    Parameters
+    ----------
+    stock_data    : collect_all() 반환값에서 KOSPI 를 뺀 종목 dict (full-column)
+    kospi_df      : KOSPI OHLCV (알파 계산용, 없으면 None)
+    thresholds    : 진입 임계값 후보들
+    step          : 가중치 그리드 간격 (0.2 → 56조합)
+    weights_list  : 명시하면 그리드 대신 이 조합들만 실행
+                    (예: 현 운영 가중치 단일 검증)
+
+    Returns
+    -------
+    (all_trades_df, summary_df)  — summary 는 robust 평균수익 기준 정렬
+    """
+    trade_start, trade_end = _trade_window(stock_data, warmup_months)
+    combos = weights_list if weights_list is not None else generate_weight_grid(step)
 
     if verbose:
         print(f"\n실거래 구간: {trade_start.date()} ~ {trade_end.date()}")
-        n_rules = len(RULES)
-        print(f"51조합 × {n_rules}규칙 = {51*n_rules}회 실행 (ADAPTIVE 포함)\n")
+        print(f"{len(combos)}조합 × {len(thresholds)}임계값 = "
+              f"{len(combos)*len(thresholds)}회 실행 "
+              f"(게이트={'ON' if gate else 'OFF'}, 종목당 {capital_per_trade:,.0f}원)\n")
+
+    if verbose:
+        print("[1/2] 영역 점수 사전 계산 (종목당 1회) ...")
+    areas_bt, atr_bt, phase_bt, _, _ = prepare_scoring_inputs(stock_data)
+
+    if verbose:
+        print("[2/2] 조합 그리드 시뮬레이션 ...")
 
     all_trades_rows = []
-    summary_rows    = []
-    total_runs      = len(combos) * len(RULES)
-    run_count       = 0
+    summary_rows = []
+    total_runs = len(combos) * len(thresholds)
+    run_count = 0
 
     for combo in combos:
-        label   = combo["label"]
+        label = combo["label"]
         weights = combo["weights"]
+        scored_data = build_scored_data(
+            stock_data, areas_bt, atr_bt, phase_bt, weights,
+            gate=gate, exclude_phases=exclude_phases,
+        )
 
-        # 점수 사전 계산 (조합당 1회)
-        scored_data: dict[str, pd.DataFrame] = {}
-        for ticker in stock_tickers:
-            try:
-                scored_data[ticker] = compute_scores(raw_data[ticker], weights)
-            except Exception as exc:
-                if verbose:
-                    print(f"  [scorer] {ticker} 오류: {exc} — 건너뜀")
-
-        for rule in RULES:
+        for thr in thresholds:
             run_count += 1
             if verbose:
-                print(f"[{run_count:3d}/{total_runs}] {label} / {rule}", end=" ... ", flush=True)
-
+                print(f"[{run_count:3d}/{total_runs}] {label} thr={thr}",
+                      end=" ... ", flush=True)
             try:
-                # ── 모든 규칙 (R1 / R3 / ADAPTIVE) ──────────────────────
-                # ADAPTIVE 는 simulate_ticker() 내부에서 진입 신호 당일
-                # 직전 40거래일 점수로 rolling 동적 분류 수행 (look-ahead bias 없음)
                 trades_list, equity_df = run_simulation(
-                    scored_data, rule, trade_start, trade_end
+                    scored_data, trade_start, trade_end,
+                    entry_threshold=thr, capital_per_trade=capital_per_trade,
                 )
-
                 tdf = trades_to_df(trades_list)
                 metrics = compute_metrics(tdf, equity_df, kospi_df, trade_start, trade_end)
 
-                # 거래 기록에 레이블 추가
                 if not tdf.empty:
                     tdf.insert(0, "weight_label", label)
-                    tdf.insert(1, "rule", rule)
+                    tdf.insert(1, "threshold", thr)
                     all_trades_rows.append(tdf)
 
-                # 요약
                 summary_rows.append({
-                    "weight_label":         label,
-                    "rule":                 rule,
-                    "total_return_pct":     metrics["total_return_pct"],
-                    "kospi_return_pct":     metrics.get("kospi_return_pct"),
-                    "alpha_pct":            metrics.get("alpha_pct"),
-                    "n_trades":             metrics["n_trades"],
-                    "win_rate_pct":         metrics["win_rate_pct"],
-                    "profit_factor":        metrics["profit_factor"],
-                    "avg_trade_return_pct": metrics["avg_trade_return_pct"],
-                    "mdd_pct":              metrics["mdd_pct"],
-                    "sharpe":              metrics["sharpe"],
-                    "sortino":             metrics["sortino"],
-                    "calmar":              metrics["calmar"],
-                    "avg_hold_days":       metrics["avg_hold_days"],
+                    "weight_label":                 label,
+                    "threshold":                    thr,
+                    **{k: weights[k] for k in AREA_KEYS},
+                    "total_return_pct":             metrics["total_return_pct"],
+                    "kospi_return_pct":             metrics.get("kospi_return_pct"),
+                    "alpha_pct":                    metrics.get("alpha_pct"),
+                    "n_trades":                     metrics["n_trades"],
+                    "win_rate_pct":                 metrics["win_rate_pct"],
+                    "profit_factor":                metrics["profit_factor"],
+                    "avg_trade_return_pct":         metrics["avg_trade_return_pct"],
+                    "robust_avg_trade_return_pct":  metrics["robust_avg_trade_return_pct"],
+                    "robust_total_pnl_krw":         metrics["robust_total_pnl_krw"],
+                    "top5_pnl_share_pct":           metrics["top5_pnl_share_pct"],
+                    "mdd_pct":                      metrics["mdd_pct"],
+                    "sharpe":                       metrics["sharpe"],
+                    "avg_hold_days":                metrics["avg_hold_days"],
                 })
 
                 if verbose:
-                    alpha_str = (
-                        f"alpha={metrics['alpha_pct']:+.2f}%"
-                        if metrics.get("alpha_pct") is not None
-                        else "alpha=N/A"
-                    )
-                    print(
-                        f"ret={metrics['total_return_pct']:+.2f}% | "
-                        f"{alpha_str} | "
-                        f"win={metrics['win_rate_pct']:.0f}% | "
-                        f"trades={metrics['n_trades']}"
-                    )
-
+                    print(f"ret={metrics['total_return_pct']:+.2f}% | "
+                          f"robust평균={metrics['robust_avg_trade_return_pct']:+.2f}% | "
+                          f"N={metrics['n_trades']}")
             except Exception as exc:
                 if verbose:
                     print(f"오류: {exc}")
                     traceback.print_exc()
                 summary_rows.append({
-                    "weight_label": label,
-                    "rule":         rule,
-                    "error":        str(exc),
+                    "weight_label": label, "threshold": thr, "error": str(exc),
                 })
 
-    # 결과 집계
-    all_trades_df = pd.concat(all_trades_rows, ignore_index=True) if all_trades_rows else pd.DataFrame()
-    summary_df    = pd.DataFrame(summary_rows)
+    all_trades_df = (pd.concat(all_trades_rows, ignore_index=True)
+                     if all_trades_rows else pd.DataFrame())
+    summary_df = pd.DataFrame(summary_rows)
 
-    # 알파 기준 정렬 (알파 없을 시 총 수익률 기준)
-    if "alpha_pct" in summary_df.columns and summary_df["alpha_pct"].notna().any():
-        summary_df = summary_df.sort_values("alpha_pct", ascending=False).reset_index(drop=True)
+    # robust 평균수익 기준 정렬 (없으면 총수익률) — 소수 대박 의존 조합 패널티
+    if "robust_avg_trade_return_pct" in summary_df.columns and \
+            summary_df["robust_avg_trade_return_pct"].notna().any():
+        summary_df = summary_df.sort_values(
+            ["robust_avg_trade_return_pct", "total_return_pct"],
+            ascending=False).reset_index(drop=True)
     elif "total_return_pct" in summary_df.columns:
-        summary_df = summary_df.sort_values("total_return_pct", ascending=False).reset_index(drop=True)
-
+        summary_df = summary_df.sort_values(
+            "total_return_pct", ascending=False).reset_index(drop=True)
     summary_df.insert(0, "rank", range(1, len(summary_df) + 1))
 
     return all_trades_df, summary_df
 
 
 # ---------------------------------------------------------------------------
-# 조합 코드 생성 유틸
-# ---------------------------------------------------------------------------
-
-# 영역 순서 (5글자 코드의 위치 순서 고정)
-_CODE_AREAS = ("trend", "momentum", "volume", "volatility", "wyckoff")
-_CODE_AREA_ABBR = {
-    "trend":      "T",
-    "momentum":   "M",
-    "volume":     "V",
-    "volatility": "P",   # Position/Volatility
-    "wyckoff":    "W",
-}
-
-
-def _weights_to_code(weights: dict[str, float]) -> str:
-    """
-    가중치 dict → 5글자 L/B/H 코드 + 가중치 수치 문자열.
-
-    영역 순서: Trend(T) - Momentum(M) - Volume(V) - Volatility(P) - Wyckoff(W)
-
-    각 영역:
-      Low  (Basic - 0.05) → L
-      Basic               → B
-      High (Basic + 0.05) → H
-      (그 외 ε 허용 0.001)
-
-    반환 예시: "BBBBB (20/25/25/10/20)"
-    """
-    code_chars = []
-    pct_parts  = []
-
-    for area in _CODE_AREAS:
-        w    = weights.get(area, BASIC_W[area])
-        base = BASIC_W[area]
-        pct_parts.append(f"{round(w * 100)}")
-
-        if abs(w - (base - DELTA)) < 1e-6:
-            code_chars.append("L")
-        elif abs(w - (base + DELTA)) < 1e-6:
-            code_chars.append("H")
-        else:
-            code_chars.append("B")
-
-    code = "".join(code_chars)
-    pct  = "/".join(pct_parts)
-    return f"{code} ({pct})"
-
-
-# ---------------------------------------------------------------------------
 # 결과 리포트 생성
 # ---------------------------------------------------------------------------
 
-def make_weight_ranking_md(summary_df: pd.DataFrame) -> str:
+def make_weight_ranking_md(summary_df: pd.DataFrame, top_n: int = 60) -> str:
     """
-    가중치 조합 알파 기준 랭킹 Markdown 문자열을 생성한다.
+    가중치 조합 랭킹 Markdown (robust 평균수익 기준).
 
-    조합 코드: T-M-V-P-W 순서로 각 영역이 L(Low)/B(Basic)/H(High)인지 표시.
-    예) BBBBB (20/25/25/10/20) — 전 영역 Basic
-        HBLBH (25/25/15/5/25) — 추세·Wyckoff High, 거래량 Low
+    행 형식은 scripts/update_strategy.py 의 파서와 약속된 정형:
+    | 순위 | T20/M20/Vu0/Va60 | 6.0 | ... |
     """
-    # summary_df 에 weight_label이 있으면 가중치 dict를 재구성해서 코드 생성
-    combos_by_label: dict[str, dict] = {
-        c["label"]: c["weights"]
-        for c in generate_weight_combinations()
-    }
-
     lines = [
-        "# 가중치 조합 알파 기준 랭킹\n",
-        "> 조합 코드 영역 순서: **T**(Trend) - **M**(Momentum) - **V**(Volume) - **P**(Volatility) - **W**(Wyckoff)  ",
-        "> 각 영역: **L**=Low(Basic−3%) / **B**=Basic / **H**=High(Basic+3%)\n",
+        "# 가중치 조합 랭킹 (v2_combined)\n",
+        "> 정렬: **robust 평균수익** (거래 수익 상위 5건 제외 평균 — 소수 대박 의존 패널티)  ",
+        "> 가중치 표기: T(추세)/M(모멘텀)/Vu(거래량)/Va(변동성) %  ",
+        "> `scripts/update_strategy.py --from-ranking <이 파일>` 으로 1위를 yaml 에 반영\n",
+        "| 순위 | 가중치 (T/M/Vu/Va) | 임계값 | robust평균수익 | 총수익률 | KOSPI알파 | 승률 | PF | MDD | 평균보유 | 거래수 | 상위5의존 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
-    lines.append("| 순위 | 조합 코드 (T-M-V-P-W) | 가중치% | 규칙 | 총 수익률 | KOSPI 알파 | 승률 | PF | Sharpe | Trades |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
-
-    for _, row in summary_df.iterrows():
-        lbl = row.get("weight_label", "")
-
+    for _, row in summary_df.head(top_n).iterrows():
         if "error" in row and pd.notna(row.get("error")):
             lines.append(
-                f"| {row['rank']} | {lbl} | — | {row['rule']} | ERROR | — | — | — | — | — |"
-            )
+                f"| {row['rank']} | {row['weight_label']} | {row.get('threshold','—')} "
+                f"| ERROR | — | — | — | — | — | — | — | — |")
             continue
-
-        # 코드 생성
-        if lbl in combos_by_label:
-            w   = combos_by_label[lbl]
-            chars = []
-            pcts  = []
-            for area in _CODE_AREAS:
-                wv   = w.get(area, BASIC_W[area])
-                base = BASIC_W[area]
-                pcts.append(str(round(wv * 100)))
-                if abs(wv - (base - DELTA)) < 1e-6:
-                    chars.append("L")
-                elif abs(wv - (base + DELTA)) < 1e-6:
-                    chars.append("H")
-                else:
-                    chars.append("B")
-            code_str = "".join(chars)
-            pct_str  = "/".join(pcts)
-        else:
-            code_str = lbl[:5] if lbl else "?????"
-            pct_str  = "—"
-
-        alpha = f"{row['alpha_pct']:+.2f}%" if pd.notna(row.get("alpha_pct")) else "N/A"
+        alpha = (f"{row['alpha_pct']:+.2f}%"
+                 if pd.notna(row.get("alpha_pct")) else "N/A")
+        top5 = (f"{row['top5_pnl_share_pct']:.0f}%"
+                if pd.notna(row.get("top5_pnl_share_pct")) else "—")
         lines.append(
             f"| {row['rank']} "
-            f"| `{code_str}` "
-            f"| {pct_str} "
-            f"| {row['rule']} "
+            f"| {row['weight_label']} "
+            f"| {row['threshold']:.1f} "
+            f"| {row['robust_avg_trade_return_pct']:+.2f}% "
             f"| {row['total_return_pct']:+.2f}% "
             f"| {alpha} "
             f"| {row['win_rate_pct']:.1f}% "
             f"| {row['profit_factor']:.2f} "
-            f"| {row['sharpe']:.2f} "
-            f"| {int(row['n_trades'])} |"
+            f"| {row['mdd_pct']:.2f}% "
+            f"| {row['avg_hold_days']:.1f}일 "
+            f"| {int(row['n_trades'])} "
+            f"| {top5} |"
         )
-
     return "\n".join(lines)
 
 
@@ -385,57 +325,53 @@ def make_backtest_report_md(
     all_trades:  pd.DataFrame,
     trade_start: str,
     trade_end:   str,
+    config_desc: str = "",
 ) -> str:
-    """
-    전체 백테스트 결과 요약 Markdown 보고서를 생성한다.
-    """
-    top5 = summary_df.head(5)
-
-    n_total   = len(summary_df)
-    n_success = summary_df.dropna(subset=["total_return_pct"]).shape[0] if not summary_df.empty else 0
-
-    best = summary_df.iloc[0] if not summary_df.empty else None
+    """전체 백테스트 결과 요약 Markdown 보고서."""
+    n_total = len(summary_df)
+    ok = summary_df.dropna(subset=["total_return_pct"]) if not summary_df.empty else summary_df
+    best = ok.iloc[0] if not ok.empty else None
 
     lines = [
-        "# Magic Formula 백테스트 리포트\n",
+        "# Magic Formula 백테스트 리포트 (v2_combined)\n",
         f"**기간**: {trade_start} ~ {trade_end}  ",
-        f"**조합 수**: 51 가중치 × 3 규칙 = 153회  ",
-        f"**성공 실행**: {n_success}/{n_total}\n",
-        "---\n",
+        f"**실행**: {len(ok)}/{n_total} 조합 성공  ",
     ]
+    if config_desc:
+        lines.append(f"**설정**: {config_desc}  ")
+    lines.append("\n---\n")
 
     if best is not None:
-        alpha_best = f"{best['alpha_pct']:+.2f}%" if pd.notna(best.get("alpha_pct")) else "N/A"
+        alpha_best = (f"{best['alpha_pct']:+.2f}%"
+                      if pd.notna(best.get("alpha_pct")) else "N/A")
         lines += [
-            "## 🏆 최고 성과 조합\n",
-            f"- **조합**: {best['weight_label']} / {best['rule']}",
-            f"- **총 수익률**: {best['total_return_pct']:+.2f}%",
-            f"- **KOSPI 알파**: {alpha_best}",
-            f"- **승률**: {best['win_rate_pct']:.1f}%",
-            f"- **Profit Factor**: {best['profit_factor']:.2f}",
-            f"- **MDD**: {best['mdd_pct']:.2f}%\n",
+            "## 🏆 최고 성과 조합 (robust 기준)\n",
+            f"- **가중치**: {best['weight_label']}  /  임계값 {best['threshold']:.1f}",
+            f"- **robust 평균수익** (상위5 제외): {best['robust_avg_trade_return_pct']:+.2f}%",
+            f"- **총 수익률**: {best['total_return_pct']:+.2f}%   |   KOSPI 알파: {alpha_best}",
+            f"- **승률**: {best['win_rate_pct']:.1f}%   |   PF: {best['profit_factor']:.2f}"
+            f"   |   MDD: {best['mdd_pct']:.2f}%",
+            f"- **거래**: {int(best['n_trades'])}건, 평균 보유 {best['avg_hold_days']:.1f}일\n",
         ]
 
     lines += ["## 상위 5개 조합\n"]
-    for _, row in top5.iterrows():
-        if "error" in row and pd.notna(row.get("error")):
-            continue
-        alpha = f"{row['alpha_pct']:+.2f}%" if pd.notna(row.get("alpha_pct")) else "N/A"
+    for _, row in ok.head(5).iterrows():
+        alpha = (f"{row['alpha_pct']:+.2f}%"
+                 if pd.notna(row.get("alpha_pct")) else "N/A")
         lines.append(
-            f"**{row['rank']}위** `{row['weight_label']}` / `{row['rule']}`  "
+            f"**{row['rank']}위** `{row['weight_label']}` thr={row['threshold']:.1f}  "
+            f"robust {row['robust_avg_trade_return_pct']:+.2f}% | "
             f"수익률 {row['total_return_pct']:+.2f}% | 알파 {alpha} | "
             f"승률 {row['win_rate_pct']:.1f}% | PF {row['profit_factor']:.2f}\n"
         )
 
-    # 거래 통계
     if not all_trades.empty and "net_pnl" in all_trades.columns:
         total_trades = len(all_trades)
-        winners      = all_trades[all_trades["net_pnl"] > 0]
         lines += [
             "\n---\n",
-            "## 전체 거래 통계 (153조합 합산)\n",
+            "## 전체 거래 통계 (전 조합 합산)\n",
             f"- 총 거래 수: {total_trades:,}건",
-            f"- 평균 수익: {all_trades['net_pnl'].mean():,.0f}원",
+            f"- 평균 손익: {all_trades['net_pnl'].mean():,.0f}원",
             f"- 최대 이익: {all_trades['net_pnl'].max():,.0f}원",
             f"- 최대 손실: {all_trades['net_pnl'].min():,.0f}원",
         ]

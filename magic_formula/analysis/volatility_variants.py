@@ -26,7 +26,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from magic_formula.scoring.scorer import _bollinger, _clip
+from magic_formula.indicators import _bollinger, _clip
 
 _MIN_ROWS = 60
 

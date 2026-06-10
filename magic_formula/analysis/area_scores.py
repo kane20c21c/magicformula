@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from magic_formula.scoring.scorer import _rsi, _obv, _clip, _macd, _stoch_k
+from magic_formula.indicators import _rsi, _obv, _clip, _macd, _stoch_k  # noqa: F401 (_macd/_stoch_k 는 변형 연구 호환)
 from magic_formula.analysis.trend_variants import score_D_v2
 from magic_formula.analysis import volatility_variants as VLV
 
@@ -179,6 +179,57 @@ COMBINED_WEIGHTS = {"trend": 0.2, "momentum": 0.2, "volume": 0.0, "volatility": 
 COMBINED_THRESHOLD = 6.0   # 확정 (5.0 후보)
 GATE_EXCLUDE_PHASES = ("Markdown",)   # 매수 제외 국면
 
+AREA_KEYS = ("trend", "momentum", "volume", "volatility")
+
+
+def compute_area_scores(
+    df:             pd.DataFrame,
+    regime_breadth: pd.Series,
+    regime_quick:   pd.Series,
+) -> dict[str, pd.Series]:
+    """
+    4영역 점수를 한 번에 계산해서 dict 로 반환한다.
+
+    가중치 조합이 바뀌어도 영역 점수는 동일하므로, 그리드 백테스트나
+    데일리 리포트에서는 이 결과를 캐시하고 combine_scores() 로 결합만
+    반복하면 중복 계산이 없다.
+    """
+    return {
+        "trend":      score_trend(df, regime_breadth),
+        "momentum":   score_momentum(df),
+        "volume":     score_volume(df, regime_quick),
+        "volatility": score_volatility(df, regime_quick),
+    }
+
+
+def combine_scores(
+    areas:          dict[str, pd.Series],
+    weights:        dict[str, float] | None = None,
+    phase_label:    pd.Series | None = None,
+    gate:           bool = True,
+    exclude_phases: tuple[str, ...] = GATE_EXCLUDE_PHASES,
+) -> pd.Series:
+    """
+    compute_area_scores() 결과를 가중 결합 + Wyckoff 게이트 적용.
+
+    종합점수 = Σ(w_i · area_i) / Σw, ±10 클립.
+    게이트 ON 이면 Wyckoff 국면이 exclude_phases (기본 Markdown) 일 때
+    점수를 NaN 으로 (매수 후보 제외).
+    """
+    if weights is None:
+        weights = COMBINED_WEIGHTS
+    wsum = sum(weights[k] for k in AREA_KEYS)
+    if wsum <= 0:
+        raise ValueError(f"가중치 합이 0 이하: {weights}")
+    acc = None
+    for k in AREA_KEYS:
+        term = weights[k] * areas[k]
+        acc = term if acc is None else acc + term
+    comp = _clip(acc / wsum)
+    if gate and phase_label is not None:
+        comp = comp.where(~phase_label.reindex(comp.index).isin(exclude_phases))
+    return comp
+
 
 def compute_combined_score(
     df:             pd.DataFrame,
@@ -187,37 +238,17 @@ def compute_combined_score(
     phase_label:    pd.Series,
     weights:        dict[str, float] | None = None,
     gate:           bool = True,
+    exclude_phases: tuple[str, ...] = GATE_EXCLUDE_PHASES,
 ) -> pd.Series:
     """
-    4영역 가중 결합 종합 점수 + Wyckoff 국면 게이트.
+    4영역 가중 결합 종합 점수 + Wyckoff 국면 게이트 (단일 진입점).
 
-    종합점수 = (wt·추세 + wm·모멘텀 + wvu·거래량 + wva·변동성) / Σw, ±10 클립.
-    게이트 ON 이면 Wyckoff 국면이 GATE_EXCLUDE_PHASES (기본 Markdown) 일 때
-    점수를 NaN 으로 (매수 후보 제외).
-
-    Parameters
-    ----------
-    df             : OHLCV (full-column, 거래량/BB/심리지표 포함)
-    regime_breadth : 추세 영역 레짐 (make_regimes 첫번째)
-    regime_quick   : 거래량·변동성 영역 레짐 (make_regimes 두번째)
-    phase_label    : hillstorm Wyckoff_Label Series (게이트용)
-    weights        : {trend,momentum,volume,volatility}. None 이면 COMBINED_WEIGHTS.
-    gate           : Markdown 게이트 적용 여부.
+    내부적으로 compute_area_scores() + combine_scores() 를 호출한다.
+    영역 점수를 재사용하려면 두 함수를 직접 쓰는 편이 효율적이다.
 
     Returns
     -------
     종합 점수 Series (게이트 제외 구간은 NaN).
     """
-    if weights is None:
-        weights = COMBINED_WEIGHTS
-    st = score_trend(df, regime_breadth)
-    sm = score_momentum(df)
-    sv = score_volume(df, regime_quick)
-    sp = score_volatility(df, regime_quick)
-    wt, wm, wvu, wva = (weights["trend"], weights["momentum"],
-                        weights["volume"], weights["volatility"])
-    wsum = wt + wm + wvu + wva
-    comp = _clip((wt * st + wm * sm + wvu * sv + wva * sp) / wsum)
-    if gate and phase_label is not None:
-        comp = comp.where(~phase_label.reindex(comp.index).isin(GATE_EXCLUDE_PHASES))
-    return comp
+    areas = compute_area_scores(df, regime_breadth, regime_quick)
+    return combine_scores(areas, weights, phase_label, gate, exclude_phases)
