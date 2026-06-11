@@ -191,7 +191,12 @@ def run(
             pd.DataFrame({"composite_score": comp}), cfg.threshold
         )
 
-        phase_now = phases[t].iloc[-1] if len(phases[t]) else ""
+        # 표시용 국면 = Wyckoff_Phase (이중 라벨 2026-06-11 — 서술 전용,
+        # hillstorm phase.py 참조). 게이트 로직은 phases(=Wyckoff_Label) 그대로.
+        if "Wyckoff_Phase" in df.columns and df["Wyckoff_Phase"].notna().any():
+            phase_now = df["Wyckoff_Phase"].iloc[-1]
+        else:   # 구 parquet 폴백
+            phase_now = phases[t].iloc[-1] if len(phases[t]) else ""
 
         # Wyckoff 전환 신호 + 강도 (LLV 가 채운 컬럼 — 평소 None)
         wy_sig = (df["Wyckoff_Signal"].iloc[-1]

@@ -36,8 +36,18 @@ def json_default(obj):
 # ---------------------------------------------------------------------------
 
 def _phase_short(label: str) -> str:
-    """국면 라벨 → 약어 (md 표 가독성)."""
+    """국면 라벨 → 약어 (md 표 가독성).
+
+    이중 라벨 (2026-06-11): wyckoff_phase 필드 정본은 서술용 Wyckoff_Phase
+    (Uptrend/Downtrend/Range/Base — hillstorm phase.py). 구 JSON 어휘 호환 유지.
+    """
     mapping = {
+        # 신규 — Wyckoff_Phase (서술용)
+        "Uptrend": "상승",
+        "Downtrend": "하락",
+        "Range": "레인지",
+        "Base": "바닥권",
+        # 구 JSON 호환 — Wyckoff_Label
         "Accumulation": "Accum",
         "Markup": "Markup",
         "Distribution": "Dist",
