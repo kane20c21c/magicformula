@@ -169,6 +169,13 @@ TICKER_NAMES_FALLBACK: dict[str, str] = {
     "102110": "TIGER 200",
 }
 
+# 확장(extend) 종목명 보강 — extend_tickers.EXTEND_LIST 정본.
+# 확장 종목 parquet 의 Name 이 일시적으로 NA(백필 직후 등)여도 종목명이 티커로
+# 떨어지지 않도록, 코어 폴백 dict 에 확장 131종목 이름을 채운다. (코어와 키 충돌 없음)
+for _et, _enm, _es in _VAULT_EXTEND_LIST:
+    if _enm and _et not in TICKER_NAMES_FALLBACK:
+        TICKER_NAMES_FALLBACK[_et] = _enm
+
 # ---------------------------------------------------------------------------
 # 공개 API
 # ---------------------------------------------------------------------------
