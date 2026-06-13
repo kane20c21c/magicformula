@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- com.stolab.magic-formula.daily-extended-signal.plist
+     Magic Formula 확장(extend) 데일리 시그널 — 시총 200 유니버스(core ∪ extend).
+     평일 16:35 + 20:45 KST 하루 2회 자동 실행 (코어 daily-signal 16:30/20:40 직후 5분).
+
+     코어 daily_signal(69) 은 별도 plist(com.stolab.magic-formula.daily-signal)가 유지.
+     이 잡은 daily_extended_signal.py 로 universe="extended_all"(200) 을 스코어링해
+     daily_extended_signal_YYYYMMDD.{json,md} 와 daily_extended_regimes_*.json 을 산출한다.
+     코어 산출물(daily_signal_*, daily_regimes_*) 은 덮어쓰지 않는다.
+
+     전제: longlivevault kis_update.py(16:00/20:30) 가 core.parquet + extend.parquet 에
+     당일 종가 기준 OHLCV+Wyckoff 를 적재한 뒤 실행되어야 정확한 라벨이 나온다.
+     16:35 잠정판 / 20:45 확정판 (20:30 확정 종가 반영). 등록/제거는 README.md 참고. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stolab.magic-formula.daily-extended-signal</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_extended_signal.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/kaneyoun/.pyenv/shims</string>
+    </dict>
+
+    <!-- 평일 (월~금) 16:35 + 20:45 하루 2회 실행 -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 16:35 잠정판 (월~금) -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+        <!-- 20:45 확정판 (월~금) -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_extended_signal.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_extended_signal.err</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
