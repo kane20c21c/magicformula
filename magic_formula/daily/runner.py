@@ -118,6 +118,9 @@ def get_prev_day_info(df: pd.DataFrame) -> dict:
 def run(
     target_date: str | None = None,
     config_path: str | None = None,
+    output_prefix: str = "daily_signal",
+    regimes_prefix: str = "daily_regimes",
+    universe_override: str | None = None,
 ) -> dict:
     """
     데일리 파이프라인 실행 (v2_combined).
@@ -126,6 +129,14 @@ def run(
     ----------
     target_date : vault 조회 종료 일자 ('YYYYMMDD'). None 이면 오늘.
     config_path : active_strategy.yaml 경로. None 이면 기본 위치.
+    output_prefix : 신호 JSON/MD 파일명 접두사. 기본 "daily_signal"
+                    (코어 69). 확장 200 산출은 "daily_extended_signal" 을 넘겨
+                    기존 코어 파일을 덮어쓰지 않게 한다.
+    regimes_prefix : 레짐 사이드카 파일명 접두사. 기본 "daily_regimes".
+                     확장 실행은 "daily_extended_regimes" 로 분리해 StockPortfolio
+                     즉석 v2 가 읽는 코어 레짐(daily_regimes_)을 보호한다.
+    universe_override : 설정 yaml 의 universe 를 무시하고 이 식별자를 쓴다
+                     (예: "extended_all"). 가중치/임계값은 yaml 정본 그대로 공유.
 
     Returns
     -------
@@ -143,11 +154,12 @@ def run(
     if target_date is None:
         target_date = executed_at
 
-    tickers = get_universe(cfg.universe)
+    universe_name = universe_override or cfg.universe
+    tickers = get_universe(universe_name)
     if not tickers:   # vault 미설치 안전망
         tickers = list(SECTOR_MAP.keys())
     print(f"[daily.runner] 실행={executed_at} 조회종료={target_date} "
-          f"universe={cfg.universe} ({len(tickers)}개) thr={cfg.threshold} "
+          f"universe={universe_name} ({len(tickers)}개) thr={cfg.threshold} "
           f"gate={'ON' if cfg.gate_enabled else 'OFF'}")
 
     # ── 1. 전 종목 로드 (레짐은 횡단면이라 전체 필요) ──
@@ -250,7 +262,7 @@ def run(
                  if last_dates else executed_at)
 
     # ── 레짐 시계열 사이드카 저장 (StockPortfolio 즉석 v2 가 빌려 씀) ──
-    _save_regimes(regime_b, regime_q, data_date)
+    _save_regimes(regime_b, regime_q, data_date, prefix=regimes_prefix)
 
     result = {
         "date": data_date, "executed_at": executed_at,
@@ -264,8 +276,8 @@ def run(
         "signals": signals, "all_scores": all_results,
     }
 
-    json_path = OUTPUT_DIR / f"daily_signal_{data_date}.json"
-    md_path = OUTPUT_DIR / f"daily_signal_{data_date}.md"
+    json_path = OUTPUT_DIR / f"{output_prefix}_{data_date}.json"
+    md_path = OUTPUT_DIR / f"{output_prefix}_{data_date}.md"
     json_path.write_text(
         json.dumps(result, ensure_ascii=False, indent=2, default=json_default),
         encoding="utf-8")
@@ -297,14 +309,16 @@ def _regime_to_dict(ser: pd.Series) -> dict:
     return out
 
 
-def _save_regimes(regime_b: pd.Series, regime_q: pd.Series, data_date: str) -> None:
+def _save_regimes(regime_b: pd.Series, regime_q: pd.Series, data_date: str,
+                  prefix: str = "daily_regimes") -> None:
     """횡단면 레짐 2종을 사이드카 JSON 으로 저장.
 
-    파일: output/signals/daily_regimes_{data_date}.json
-    소비자(StockPortfolio 즉석 v2)는 가장 최근 파일을 읽어 코어 외 종목 점수에
-    그대로 빌려 쓴다. 레짐은 시장 전체 공통이라 종목 무관.
+    파일: output/signals/{prefix}_{data_date}.json
+    소비자(StockPortfolio 즉석 v2)는 가장 최근 daily_regimes_ 파일을 읽어 코어 외
+    종목 점수에 그대로 빌려 쓴다. 레짐은 시장 전체 공통이라 종목 무관.
+    확장 실행은 prefix="daily_extended_regimes" 로 분리 저장(코어 레짐 보호).
     """
-    path = OUTPUT_DIR / f"daily_regimes_{data_date}.json"
+    path = OUTPUT_DIR / f"{prefix}_{data_date}.json"
     payload = {
         "date": data_date,
         "breadth": _regime_to_dict(regime_b),   # 추세 영역 (10/10/0.60)

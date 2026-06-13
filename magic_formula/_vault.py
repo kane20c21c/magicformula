@@ -77,6 +77,17 @@ except ImportError:
     _VAULT_TICKER_LIST = []
     VAULT_AVAILABLE = False
 
+# 확장(extend) 종목 — vault 가 더 넓은 모니터링 유니버스(시총 200)를 위해 제공.
+# 미설치/구버전 vault 면 빈 집합으로 폴백 (core 만으로 동작).
+try:
+    from stolab_data.extend_tickers import (  # type: ignore
+        EXTEND_TICKERS as _VAULT_EXTEND,
+        EXTEND_LIST as _VAULT_EXTEND_LIST,
+    )
+except ImportError:
+    _VAULT_EXTEND = frozenset()
+    _VAULT_EXTEND_LIST = []
+
 # ---------------------------------------------------------------------------
 # 정본 데이터
 # ---------------------------------------------------------------------------
@@ -90,14 +101,21 @@ DEFAULT_EXCLUDE: frozenset[str] = frozenset({
 # 종목 목록 (vault 정본, vault 미설치 시 빈 집합)
 CORE_TICKERS: frozenset[str] = frozenset(_VAULT_CORE)
 
-# 섹터 매핑 (vault TICKER_LIST 에서 빌드)
-TICKER_SECTORS: dict[str, str] = {
-    t: s for t, _name, s in _VAULT_TICKER_LIST
-}
+# 확장 종목 집합 (vault extend.parquet 대상 131종목)
+EXTEND_TICKERS: frozenset[str] = frozenset(_VAULT_EXTEND)
 
-# 섹터 순서 (vault 정의 순서대로 등장 순)
+# 섹터 매핑 (vault TICKER_LIST + EXTEND_LIST 에서 빌드)
+# core 와 extend 가 겹치지 않으므로 단순 병합. core 우선.
+TICKER_SECTORS: dict[str, str] = {
+    t: s for t, _name, s in _VAULT_EXTEND_LIST
+}
+TICKER_SECTORS.update({
+    t: s for t, _name, s in _VAULT_TICKER_LIST
+})
+
+# 섹터 순서 (vault 정의 순서대로 등장 순) — core 먼저, 이어서 extend 신규 섹터
 SECTOR_ORDER: list[str] = []
-for _t, _n, _s in _VAULT_TICKER_LIST:
+for _t, _n, _s in list(_VAULT_TICKER_LIST) + list(_VAULT_EXTEND_LIST):
     if _s not in SECTOR_ORDER:
         SECTOR_ORDER.append(_s)
 
@@ -162,6 +180,9 @@ TICKER_NAMES_FALLBACK: dict[str, str] = {
 _UNIVERSE_BUILDERS: dict[str, "callable"] = {
     "core_all":        lambda: sorted(CORE_TICKERS),
     "core_excl_split": lambda: sorted(CORE_TICKERS - DEFAULT_EXCLUDE),
+    # ── 확장 유니버스 (core ∪ extend = 시총 200) ───────────────
+    "extended_all":        lambda: sorted(CORE_TICKERS | EXTEND_TICKERS),
+    "extended_excl_split": lambda: sorted((CORE_TICKERS | EXTEND_TICKERS) - DEFAULT_EXCLUDE),
     # ── deprecated aliases (호환용) ────────────────────────────
     "core_59":         lambda: sorted(CORE_TICKERS),                       # core_all alias
     "core_57":         lambda: sorted(CORE_TICKERS - DEFAULT_EXCLUDE),     # core_excl_split alias
