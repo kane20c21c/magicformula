@@ -1,0 +1,85 @@
+# classification.yaml — 4셀(섹터×종목) 분류 + 셀별 신호해석 정본
+# 작성: 2026-06-14 Kane & 클로이
+# 소유: Magic Formula (판단 근거 프로젝트). 로직·임계치는 전부 이 파일.
+# LLV 는 이 결과를 받아 서빙만 한다 (LLV 는 계산/판단하지 않음).
+# 생성기: scripts/generate_classification.py  → 결과 data/holdtiming/ticker_classification.json
+# 근거 검증: docs/holdtiming/검증항목명세.md, 셀별_매매규칙_20260614.md
+
+method: log_close_linreg          # log(종가) 선형회귀
+window_start: '2025-04-30'        # 한국시장 레짐 변화 시작점 (Kane 지정) — 이 날부터 현재까지
+window_end: null                  # null = 최신 거래일
+
+# ─────────────────────────────────────────────────────
+# 분류 임계치 (판단 기준 — 이 값들이 셀을 가른다)
+# ─────────────────────────────────────────────────────
+cutoffs:
+  stock_trend_r2: 0.70            # 종목 R²≥이값 & 우상향 → 추세형 / R²<이값 → 타이밍형
+  sector_trend_medr2: 0.70        # 섹터 R²중앙값≥이값 → 추세섹터 / 미만 → 타이밍섹터
+  precision_timing_r2: 0.55       # 추세타이밍_정밀: R²<이값 & 추세섹터 (스윙 전용·검증됨)
+
+# 종목성격 판정:
+#   R² >= stock_trend_r2 & slope > 0  → 추세형-우상향  (보유)
+#   R² >= stock_trend_r2 & slope <= 0 → 추세형-우하향  (셀 제외, 현 강세장 2종목)
+#   R² <  stock_trend_r2              → 타이밍형
+# 섹터성격: 섹터 내 종목 R² 중앙값 기준
+# 셀4 = {섹터성격}-{종목성격}  (우하향은 null)
+
+# ─────────────────────────────────────────────────────
+# 셀별 신호해석 규칙 (★ 핵심: 같은 지표도 셀 따라 다른 액션)
+# 소비자(미인대회·quickview·Morning Brief)가 이 규칙을 강제 참조
+# 근거: 셀별_매매규칙_20260614.md, phase2 캘리브레이션, phase3 백테스트
+# ─────────────────────────────────────────────────────
+cell_rules:
+  추세-추세:
+    label: 최강 지속
+    type_label: 보유형     # 배지/표식용 성격 라벨 (종목 추세 → 보유형)
+    mode: 보유            # 강세장 백테스트: B&H 압승(+256%), 타이밍 재앙
+    rsi_overbought: 지속(매도 아님, >80이면 가속진입)
+    rsi_oversold_buy: 25  # 깊을수록 강반등(<25)
+    bb_upper: 돌파(매도 금지)
+    bb_lower_k: 2.5       # 깊은 하단에서 강반등 추가매수
+    sell_signals: 무시    # DIST·국면전환 전부 역효과(팔면 +상승)
+    action_hold: 보유 유지 — 어떤 신호로도 팔지 마라. 눌림(RSI<25·BB하단k2.5)에서만 추가매수.
+    action_new: 신규 진입 가능 — 추세 종목은 진입 타이밍 재지 말고 매수(깊은 눌림 대기는 16~28%만 와서 기회비용·평균 더 비쌈). 분할 진입 시 얕은 눌림(MA20 근처)만 활용.
+
+  추세-타이밍:
+    label: 최강 역추세(평균회귀 채널)
+    type_label: 스윙형     # 종목 타이밍 → 스윙형
+    mode: 스윙            # ★ 타이밍이 실제로 먹히는 유일 셀. 정밀(R²<0.55)에선 스윙>보유
+    rsi_overbought_sell: 70   # 70+ 분할매도(80+ 강), fade 선명
+    rsi_oversold_buy: 33      # 30~35만(20↓은 떨어지는 칼날, 사지마)
+    bb_upper_k: 1.5       # 좁은 상단 분할매도(튕김)
+    bb_lower_k: 1.5       # 좁은 하단 매수(얕게)
+    sell_signals: 유효(DIST매도·Label→Markdown 청산만, Phase전환은 늦어서 무효)
+    action_hold: 강세(과매수·BB상단·DIST)에 분할매도, 약세(BB하단·RSI30~35)에 매수 — 스윙. 추격매수 금지. 청산은 빠른 Label. 정밀종목은 보유보다 스윙이 유리.
+    action_new: 약세 되돌림에서만 신규 진입(BB하단k1.5·RSI30~35). 강세 추격 금지. RSI<20 깊은 과매도는 떨어지는 칼날이라 진입 금지.
+
+  타이밍-타이밍:
+    label: 약신호·중립
+    type_label: 스윙형     # 종목 타이밍 → 스윙형
+    mode: 보수역추세
+    rsi_overbought_sell: 70
+    rsi_oversold_buy: 25
+    bb_upper_k: 2.0       # 약한 매도
+    bb_lower_k: 2.0
+    sell_signals: 약함
+    action_hold: 약세 스냅백(RSI<25·BB하단)에서 추가매수. 강세 추격 금지. 확신 신호 외 관망.
+    action_new: 약세(RSI<25·BB하단)에서만 소량 신규 진입. 강세 추격 금지, 평소 관망.
+
+  타이밍-추세:
+    label: 약한 지속
+    type_label: 보유형     # 종목 추세 → 보유형
+    mode: 약보유
+    rsi_overbought: 약함(85 극단만 반전)
+    rsi_oversold_buy: 27
+    bb_upper: 돌파(매도 금지)
+    bb_lower_k: 2.5       # 강반등 매수
+    sell_signals: 신뢰낮음(Signal_Strength 강한 것만)
+    action_hold: 기본 보유, 신호 신뢰도 낮으니 강한 신호만 행동. 눌림 추가매수 유효.
+    action_new: 신규는 눌림(BB하단k2.5)에서 매수. 신호 신뢰 낮아 강한 신호만 진입.
+
+# 운영 메모(강세장 전제, 2026):
+#   - 전 셀 B&H가 수익 우위. 타이밍 규칙의 가치는 MDD 보험.
+#   - 능동 스윙은 추세타이밍_정밀(R²<0.55) 11종목에 한정 권장.
+#   - 손절은 강세장서 무익(이긴 포지션 절단). 손절 없거나 넓게.
+caveat: 강세장 전용 검증(2025-04~2026-06). 보유 기본, 타이밍은 MDD 부담구간·정밀셀 한정.
