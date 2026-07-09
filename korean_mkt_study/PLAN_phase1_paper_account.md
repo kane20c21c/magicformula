@@ -114,6 +114,18 @@ StockPortfolio/                      ← 엔진 + 원장 + API + 페이지 (신�
 | 5 | launchd plist 3종 (signal 20:45 / buy 09:10 / monitor 900초) | ✅ 정본 작성 — **등록은 Kane 수동** (§7) |
 | 6 | 문서 갱신 | ✅ 이 문서 |
 
+## 6-2. Phase 2 — 이메일 통지 (2026-07-06 구현 완료)
+
+Kane 확정: 신호 메일 **2회**(20:45 생성 직후 + 다음 거래일 **08:45** 개장 15분 전 리마인더),
+매수 체결 메일(09:10 집행 결과), 청산 체결 메일(트리거+5분 매도 직후). 신호 메일은
+신호 0건이어도 매일 발송(배치 생존 확인용).
+
+- `app/paper/notify.py` — Gmail SMTP(SP .env GMAIL_USER/GMAIL_APP_PW/ALERT_EMAIL,
+  기존 인프라 재사용) + HTML 빌더 3종. 발송 실패는 로그만 — 원장 처리 불차단.
+- `engine.run_reminder` + `POST /api/paper/notify-reminder` (멱등, 거래일 가드)
+- launchd 추가: `com.kane.stockportfolio-paper-remind.plist` (평일 08:45)
+- 테스트: tests/test_paper_notify.py 6건 (빌더·fail-safe·멱등)
+
 ## 7. launchd 등록 (Kane 실행)
 
 ```bash
