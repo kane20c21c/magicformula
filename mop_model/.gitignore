@@ -1,0 +1,6 @@
+build/
+output/signals/*.json
+__pycache__/
+*.pyc
+.venv/
+mop-signal.log
