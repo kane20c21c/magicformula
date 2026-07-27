@@ -21,11 +21,11 @@
     <array>
         <string>/usr/bin/env</string>
         <string>python3</string>
-        <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_extended_signal.py</string>
+        <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/scripts/daily_extended_signal.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -51,9 +51,9 @@
     </array>
 
     <key>StandardOutPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_extended_signal.out</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.out</string>
     <key>StandardErrorPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_extended_signal.err</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.err</string>
 
     <key>RunAtLoad</key>
     <false/>

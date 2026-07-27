@@ -37,6 +37,22 @@ from magic_formula.daily.runner import run   # noqa: E402
 if __name__ == "__main__":
     target_date = sys.argv[1] if len(sys.argv) > 1 else None
     config_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+    # 휴장 가드 (2026-07-16 Kane 지시): plist 는 평일(월~금) 조건만 알므로
+    # 공휴일 휴장은 LLV 거래일 캘린더(KIS chk_holiday 정본)로 스크립트가 직접
+    # 판단한다. 날짜 인자를 명시한 수동/백필 실행은 가드를 건너뛴다.
+    # 캘린더 미가용 시 fail-open (SP paper/engine.py 패턴) — 시그널 누락 방지 우선.
+    if target_date is None:
+        try:
+            from datetime import date
+            from stolab_data.trading_calendar import is_trading_day
+            _today = date.today()
+            if not is_trading_day(_today):
+                print(f"⏸ {_today} 휴장일 — 확장 데일리 시그널 skip (LLV 거래일 캘린더)")
+                sys.exit(0)
+        except Exception as e:
+            print(f"⚠ 거래일 캘린더 확인 실패({e}) — 가드 없이 진행")
+
     result = run(
         target_date,
         config_path,

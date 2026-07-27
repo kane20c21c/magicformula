@@ -27,12 +27,12 @@
     <array>
         <string>/usr/bin/env</string>
         <string>python3</string>
-        <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_signal.py</string>
+        <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/scripts/daily_signal.py</string>
     </array>
 
     <!-- 작업 디렉토리 -->
     <key>WorkingDirectory</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula</string>
 
     <!-- 환경 변수: launchd 가 기본적으로 PATH 가 비어있어 python3 못 찾는 경우 대비.
          Homebrew(Apple Silicon /opt/homebrew + Intel /usr/local) + 시스템 + pyenv 순. -->
@@ -102,9 +102,9 @@
 
     <!-- 로그 파일 -->
     <key>StandardOutPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_signal.out</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_signal.out</string>
     <key>StandardErrorPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/output/logs/daily_signal.err</string>
+    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_signal.err</string>
 
     <!-- 실패한 작업이 즉시 재시도되지 않도록. KeepAlive false 가 기본. -->
     <key>RunAtLoad</key>
