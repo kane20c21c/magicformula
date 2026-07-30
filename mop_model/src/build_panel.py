@@ -28,8 +28,14 @@ import json, numpy as np, pandas as pd, os
 import config as cfg
 
 
-def build_panel():
-    os.makedirs(cfg.OUT_DIR, exist_ok=True)
+def build_panel(px=None, save=True):
+    """px=None 이면 LLV core+extend parquet 을 읽는다 (운영 기본).
+
+    px 를 주면 그 프레임으로 패널을 만든다 — 잠정 당일 행을 붙인 인메모리 실행용
+    (run_gauge 15:10, 2026-07-30). save=False 면 parquet 저장을 생략하고 반환만.
+    """
+    if save:
+        os.makedirs(cfg.OUT_DIR, exist_ok=True)
 
     # 1) 섹터 분류 (ticker/name/sector 만)
     j = json.load(open(cfg.CLASSJ, encoding="utf-8"))
@@ -38,9 +44,12 @@ def build_panel():
     cls["sector_top"] = cls.sector_sub.str.split(".").str[0]
 
     # 2) 주가 병합
-    core = pd.read_parquet(cfg.CORE); core["src"] = "core"
-    ext  = pd.read_parquet(cfg.EXTEND); ext["src"] = "extend"
-    px = pd.concat([core, ext], ignore_index=True)
+    if px is None:
+        core = pd.read_parquet(cfg.CORE); core["src"] = "core"
+        ext  = pd.read_parquet(cfg.EXTEND); ext["src"] = "extend"
+        px = pd.concat([core, ext], ignore_index=True)
+    else:
+        px = px.copy()
     px["Ticker"] = px.Ticker.astype(str).str.zfill(6)
     px = px.merge(cls, on="Ticker", how="left", suffixes=("", "_cls"))
     px["Name"] = px.Ticker.map(dict(zip(cls.Ticker, cls.Name)))   # 공식 명칭 사용
@@ -87,9 +96,11 @@ def build_panel():
     px.loc[px.Gap_T1.isna(), ["y_abs", "y_rel"]] = np.nan
     px["mkt"]   = px.groupby("Date").Gap_T1.transform("mean")  # 동일가중 시장 (벤치마크)
 
-    px.to_parquet(cfg.PANEL, index=False)
+    if save:
+        px.to_parquet(cfg.PANEL, index=False)
     print(f"[panel] {len(px):,}행 / {px.Ticker.nunique()}종목 / {px.Date.nunique()}거래일 "
-          f"({px.Date.min().date()}~{px.Date.max().date()}) → {cfg.PANEL}")
+          f"({px.Date.min().date()}~{px.Date.max().date()})"
+          + (f" → {cfg.PANEL}" if save else " (인메모리)"))
     return px
 
 

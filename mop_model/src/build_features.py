@@ -58,8 +58,13 @@ def _base(px):
 G5_COLS = ["ret1","ret5","ret20","rsi","px_ma20","inst","forgn","turnover","vol20","bb_pos"]
 
 
-def build_features(panel_path=None):
-    px = pd.read_parquet(panel_path or cfg.PANEL).sort_values(["Ticker","Date"]).reset_index(drop=True)
+def build_features(panel_path=None, panel_df=None, save=True):
+    """panel_df 를 주면 인메모리 실행 (run_gauge 15:10, 2026-07-30). save=False 면
+    features.parquet/cols.json 저장 생략 — 잠정 실행이 운영 산출물을 오염시키지 않게."""
+    if panel_df is not None:
+        px = panel_df.sort_values(["Ticker","Date"]).reset_index(drop=True)
+    else:
+        px = pd.read_parquet(panel_path or cfg.PANEL).sort_values(["Ticker","Date"]).reset_index(drop=True)
     F = _base(px)
     BASE = F.columns.tolist()
     d = pd.concat([px[["Date","Ticker","Name","sector_top","sector_sub","Open","High","Low","Close",
@@ -85,10 +90,12 @@ def build_features(panel_path=None):
 
     d=d.replace([np.inf,-np.inf],np.nan)
     CHAMPION = BASE + XS + G1 + G5
-    d.to_parquet(cfg.FEATURES, index=False)
-    json.dump({"BASE":BASE,"XS":XS,"G1":G1,"G5":G5,"CHAMPION":CHAMPION},
-              open(cfg.COLS_JSON,"w"), ensure_ascii=False, indent=1)
-    print(f"[features] {len(d):,}행 | BASE {len(BASE)} + XS {len(XS)} + G1 {len(G1)} + G5 {len(G5)} = {len(CHAMPION)} → {cfg.FEATURES}")
+    if save:
+        d.to_parquet(cfg.FEATURES, index=False)
+        json.dump({"BASE":BASE,"XS":XS,"G1":G1,"G5":G5,"CHAMPION":CHAMPION},
+                  open(cfg.COLS_JSON,"w"), ensure_ascii=False, indent=1)
+    print(f"[features] {len(d):,}행 | BASE {len(BASE)} + XS {len(XS)} + G1 {len(G1)} + G5 {len(G5)} = {len(CHAMPION)}"
+          + (f" → {cfg.FEATURES}" if save else " (인메모리)"))
     return d
 
 

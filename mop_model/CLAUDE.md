@@ -66,11 +66,36 @@ python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테�
 ★ **Top5 가 아니라 전 종목 순위**를 싣는다 — 소비자가 NXT 미거래 종목을 건너뛰고
 차순위로 충원해야 하기 때문 (Kane 확정 2026-07-27).
 
+## 섹터 오버나이트 게이지 (15:10 잠정 — Kane 지시 2026-07-30)
+
+장 마감 전 **15:10 현재가를 임시 종가로 주입**해 챔피언 모델을 인메모리로 돌리고,
+Kane 지정 섹터 세트별 갭1 상대 상승확률의 **시가총액 가중평균**을 15:15경
+메일+푸시(스윙 포트 방식)로 보고한다. **보고 전용 — 정본 신호는 16:20 run_daily.**
+
+- **세트 정의**: `src/gauge_config.py` (Kane 편집 파일 — 8세트 44종목, 2026-07-30 확정)
+- **러너**: `src/run_gauge.py` — LLV `data_service.fetch_today_ohlcv_snapshot`(잠정
+  스냅샷, sleep 0.25초) + `compute_indicators_frame`(지표 37컬럼 정본 재계산) →
+  `build_panel(px=…, save=False)` → `build_features(panel_df=…, save=False)` →
+  챔피언 학습·스코어 → `gauge_core.aggregate_sets`(시총 가중평균, 순수 로직).
+  **전부 인메모리 — panel/features/signals 운영 산출물 무오염.**
+- **산출물**: `output/gauge/gauge_YYYY-MM-DD.json` (+ `gauge_latest.json`),
+  통지는 `src/gauge_notify.py` (paper_day notify 계약 — GMAIL_*/PUSHOVER_* 재사용)
+- **실측** (2026-07-30 드라이런): 총 109초 = 스냅샷 70 + 지표 10 + 피처/학습 29.
+  지표 재계산은 parquet 정본과 완전 일치 (RSI/MA/MACD/Supply/Weis/Wyckoff diff 0).
+  잠정 p vs 16:20 정본 p: 순위상관 0.90, |diff| 중앙값 0.05 / 최대 0.23
+  (KIS raw vs UN 통합 거래량·Amount 근사·유니버스 1종목 차이 기인 — 게이지 용도 충분)
+- **잠정치 한계 (전제)**: 동시호가(15:20~15:30) 미반영, 거래량 당일 누적 중간값,
+  p 는 절대확률이 아니라 유니버스 내 상대 백분위 (0.5 = 시장 중앙)
+- **pandas 3 주의**: venv pandas 3.x 는 `groupby.apply` 가 그룹 컬럼(Ticker)을
+  제외한다 — run_gauge 가 `_tk` 백업/복원으로 방어 (LLV 배치는 시스템 파이썬이라 무관)
+- 회귀 테스트: `MagicFormula/tests/test_mop_gauge.py` (집계·설정·통지·plist, 모킹)
+
 ## launchd
 
 | Label | 시각 | 호출 |
 |---|---|---|
 | `com.kane.magicformula-mop-signal` | 매일 16:20 | `src/run_daily.py --rebuild` |
+| `com.kane.magicformula-mop-gauge` | 매일 15:10 | `src/run_gauge.py` (휴장일 자체 판정 종료) |
 
 정본 plist 는 `configs/launchd/` — 운영본은 `~/Library/LaunchAgents/` 로 symlink.
 LLV 16:00 kis_update 종가 배치 이후 20분 여유. 등록은 Kane 수동.
