@@ -20,7 +20,7 @@ build_panel.py — LLV 원본 parquet → 정제 패널(panel.parquet)
        ListShrs 복원: 원본 → MarketCap/Close 역산 → ffill → bfill
   7) 타깃 생성: Gap_T1(종가→익일시가), y_rel(그날 중앙값 초과), y_abs
 
-⚠ 데이 포트는 오버나이트 매도를 하지 않지만(2% 손절 보유), 모델 타깃은
+⚠ 데이 포트는 오버나이트 매도를 하지 않지만(당일고점 1% 손절 보유), 모델 타깃은
   Gap_T1 그대로 유지한다 — 학습된 예측력의 정의를 바꾸지 않기 위함.
   체결 규칙 변경은 소비자(StockPortfolio app/paper_day) 소관.
 """

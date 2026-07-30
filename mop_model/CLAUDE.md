@@ -11,7 +11,7 @@ LLV (무수정)            → core/extend/ticker_classification.json 공급
    ↓ 읽기만
 MagicFormula/mop_model  → panel · features · 매일 재학습 · 전 종목 순위  ★여기
    ↓ output/signals/signal_YYYY-MM-DD.json
-StockPortfolio /day     → 데이 포트 가상계좌 (17:00 NXT 매수 + −2% 손절)
+StockPortfolio /day     → 데이 포트 가상계좌 (17:00 NXT 매수 + 당일고점 −1% 손절, 2026-07-30 −2%→−1%)
 ```
 
 ## 모델
@@ -105,5 +105,6 @@ LLV 16:00 kis_update 종가 배치 이후 20분 여유. 등록은 Kane 수동.
 검증된 엣지(홀드아웃 89일 보정알파 +0.505%, 시뮬 +4.9%)는 **t일 종가 매수 →
 t+1 시가 매도** 라는 실행 불가능한 이상체결 기준이다. 종가+1% 웃돈이면 −2.7% 로
 부호가 뒤집힌다(거래당 엣지 +0.65%). 데이 포트는 실행 가능성을 우선해
-**17:00 NXT 애프터마켓 매수 + −2% 손절 보유**로 운영하므로 성과가 다르다.
+**17:00 NXT 애프터마켓 매수 + 당일고점 −1% 손절 보유**로 운영하므로 성과가 다르다
+(청산 임계 정본 = StockPortfolio app/paper_day/config.py stop_drop_pct, 2026-07-30 −2%→−1%).
 가상계좌의 목적은 그 괴리를 실측하는 것.
