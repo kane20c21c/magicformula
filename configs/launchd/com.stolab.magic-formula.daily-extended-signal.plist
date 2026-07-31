@@ -11,51 +11,117 @@
      전제: longlivevault kis_update.py(16:00/20:30) 가 core.parquet + extend.parquet 에
      당일 종가 기준 OHLCV+Wyckoff 를 적재한 뒤 실행되어야 정확한 라벨이 나온다.
      16:35 잠정판 / 20:45 확정판 (20:30 확정 종가 반영). 등록/제거는 README.md 참고. -->
+<!-- 평일 (월~금) 16:35 + 20:45 하루 2회 실행 -->
+<!-- 16:35 잠정판 (월~금) -->
+<!-- 20:45 확정판 (월~금) -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key>
-    <string>com.stolab.magic-formula.daily-extended-signal</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/env</string>
-        <string>python3</string>
-        <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/scripts/daily_extended_signal.py</string>
-    </array>
-
-    <key>WorkingDirectory</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula</string>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/kaneyoun/.pyenv/shims</string>
-    </dict>
-
-    <!-- 평일 (월~금) 16:35 + 20:45 하루 2회 실행 -->
-    <key>StartCalendarInterval</key>
-    <array>
-        <!-- 16:35 잠정판 (월~금) -->
-        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
-        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
-        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
-        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
-        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
-        <!-- 20:45 확정판 (월~금) -->
-        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
-        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
-        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
-        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
-        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
-    </array>
-
-    <key>StandardOutPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.out</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.err</string>
-
-    <key>RunAtLoad</key>
-    <false/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/kaneyoun/.pyenv/shims</string>
+	</dict>
+	<key>Label</key>
+	<string>com.stolab.magic-formula.daily-extended-signal</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/StockPortfolio/scripts/infra/run_batch.sh</string>
+		<string>magic-formula.daily-extended-signal</string>
+		<string>/usr/bin/env</string>
+		<string>python3</string>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/scripts/daily_extended_signal.py</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.err</string>
+	<key>StandardOutPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/logs/daily_extended_signal.out</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Hour</key>
+			<integer>16</integer>
+			<key>Minute</key>
+			<integer>35</integer>
+			<key>Weekday</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>16</integer>
+			<key>Minute</key>
+			<integer>35</integer>
+			<key>Weekday</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>16</integer>
+			<key>Minute</key>
+			<integer>35</integer>
+			<key>Weekday</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>16</integer>
+			<key>Minute</key>
+			<integer>35</integer>
+			<key>Weekday</key>
+			<integer>4</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>16</integer>
+			<key>Minute</key>
+			<integer>35</integer>
+			<key>Weekday</key>
+			<integer>5</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>20</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>20</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>20</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>20</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>4</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>20</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>5</integer>
+		</dict>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula</string>
 </dict>
 </plist>

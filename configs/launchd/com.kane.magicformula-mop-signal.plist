@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+	  데이 포트 신호 생성 (MOp ML Top5) — 거래일 16:20.
+	  LLV 16:00 kis_update 종가 배치 이후 20분 여유를 두고 실행한다.
+	  build_panel → build_features → 매일 재학습 → output/signals/signal_YYYY-MM-DD.json
+	  실측 소요 약 90초 (196종목 × 778거래일 × 148피처, LGBM+CatBoost 앙상블).
+	  ⚠ venv 파이썬 절대경로 사용 — mop_model/.venv (lightgbm·catboost 격리).
+	    venv 를 다시 만들면 이 경로도 맞는지 확인할 것.
+	  거래일 판정은 없음 — 비거래일엔 features 최신일이 그대로라 같은 신호를 덮어쓸 뿐
+	  무해하고, 소비자(SP run_buy)가 거래일 가드를 따로 건다.
+	-->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -9,25 +19,17 @@
 	</dict>
 	<key>Label</key>
 	<string>com.kane.magicformula-mop-signal</string>
-	<!--
-	  데이 포트 신호 생성 (MOp ML Top5) — 거래일 16:20.
-	  LLV 16:00 kis_update 종가 배치 이후 20분 여유를 두고 실행한다.
-	  build_panel → build_features → 매일 재학습 → output/signals/signal_YYYY-MM-DD.json
-	  실측 소요 약 90초 (196종목 × 778거래일 × 148피처, LGBM+CatBoost 앙상블).
-	  ⚠ venv 파이썬 절대경로 사용 — mop_model/.venv (lightgbm·catboost 격리).
-	    venv 를 다시 만들면 이 경로도 맞는지 확인할 것.
-	  거래일 판정은 없음 — 비거래일엔 features 최신일이 그대로라 같은 신호를 덮어쓸 뿐
-	  무해하고, 소비자(SP run_buy)가 거래일 가드를 따로 건다.
-	-->
 	<key>ProgramArguments</key>
 	<array>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/StockPortfolio/scripts/infra/run_batch.sh</string>
+		<string>magicformula-mop-signal</string>
 		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/.venv/bin/python3</string>
 		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/src/run_daily.py</string>
 		<string>--rebuild</string>
 	</array>
-	<key>StandardOutPath</key>
-	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-signal.log</string>
 	<key>StandardErrorPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-signal.log</string>
+	<key>StandardOutPath</key>
 	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-signal.log</string>
 	<key>StartCalendarInterval</key>
 	<dict>

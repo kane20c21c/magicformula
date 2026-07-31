@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+	  섹터 오버나이트 게이지 (잠정) — 거래일 15:10 (Kane 지시 2026-07-30).
+	  15:10 현재가를 임시 종가로 주입해 챔피언 모델을 인메모리로 돌리고,
+	  gauge_config.SECTOR_SETS 세트별 시총 가중평균 상승확률을 15:15경
+	  메일+푸시로 보고한다. 운영 산출물(panel/features/signals)은 건드리지 않음.
+	  실측 소요 약 3분 (스냅샷 80초 + 지표 10초 + 피처/학습 90초).
+	  휴장일은 run_gauge 자체가 is_trading_day 로 판정해 조용히 종료.
+	  ⚠ venv 파이썬 절대경로 사용 — mop-signal 과 동일 .venv.
+	  정본 신호는 여전히 16:20 run_daily — 이 게이지는 보고 전용.
+	-->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -9,24 +19,16 @@
 	</dict>
 	<key>Label</key>
 	<string>com.kane.magicformula-mop-gauge</string>
-	<!--
-	  섹터 오버나이트 게이지 (잠정) — 거래일 15:10 (Kane 지시 2026-07-30).
-	  15:10 현재가를 임시 종가로 주입해 챔피언 모델을 인메모리로 돌리고,
-	  gauge_config.SECTOR_SETS 세트별 시총 가중평균 상승확률을 15:15경
-	  메일+푸시로 보고한다. 운영 산출물(panel/features/signals)은 건드리지 않음.
-	  실측 소요 약 3분 (스냅샷 80초 + 지표 10초 + 피처/학습 90초).
-	  휴장일은 run_gauge 자체가 is_trading_day 로 판정해 조용히 종료.
-	  ⚠ venv 파이썬 절대경로 사용 — mop-signal 과 동일 .venv.
-	  정본 신호는 여전히 16:20 run_daily — 이 게이지는 보고 전용.
-	-->
 	<key>ProgramArguments</key>
 	<array>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/StockPortfolio/scripts/infra/run_batch.sh</string>
+		<string>magicformula-mop-gauge</string>
 		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/.venv/bin/python3</string>
 		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/src/run_gauge.py</string>
 	</array>
-	<key>StandardOutPath</key>
-	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-gauge.log</string>
 	<key>StandardErrorPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-gauge.log</string>
+	<key>StandardOutPath</key>
 	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/mop_model/mop-gauge.log</string>
 	<key>StartCalendarInterval</key>
 	<dict>
