@@ -25,3 +25,6 @@ logs/
 !docs/**/*.yaml
 !configs/                # P2: active_strategy.yaml 보관소
 !configs/**
+
+# ── 산출물·백업 (R2 오프사이트 백업이 커버 — INFRA_DR 2026-07-31) ──
+docs/holdtiming/archive_llv_*/
