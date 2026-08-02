@@ -28,3 +28,6 @@ logs/
 
 # ── 산출물·백업 (R2 오프사이트 백업이 커버 — INFRA_DR 2026-07-31) ──
 docs/holdtiming/archive_llv_*/
+
+# ── 로그 (INFRA_DR rotate_logs.sh 가 03:00 에 <name>.YYYYMMDD.log 로 회전) ──
+*.log
