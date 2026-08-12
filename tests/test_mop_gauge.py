@@ -28,10 +28,10 @@ from gauge_notify import build_gauge_email, build_gauge_push  # noqa: E402
 # gauge_config — 세트 정의 무결성
 # ════════════════════════════════════════════════════════
 class TestGaugeConfig:
-    def test_8sets_44tickers(self):
-        """Kane 확정 2026-07-30 — 8세트 44종목."""
-        assert len(gcfg.SECTOR_SETS) == 8
-        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 44
+    def test_10sets_62tickers(self):
+        """Kane 확정 2026-07-30 8세트 44종목 → 2026-08-12 10세트 62종목."""
+        assert len(gcfg.SECTOR_SETS) == 10
+        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 62
 
     def test_ticker_format(self):
         for name, tks in gcfg.SECTOR_SETS.items():
@@ -40,6 +40,8 @@ class TestGaugeConfig:
                     f"{name}/{t} — 6자리 숫자 문자열이어야 함"
 
     def test_no_dup_within_set(self):
+        # ⚠ 세트 '간' 중복은 의도된 것 (Kane 2026-08-12) — 세트별 독립 집계라
+        #    같은 종목이 여러 세트에 들어가도 무방하다. 여기선 세트 '안' 만 본다.
         for name, tks in gcfg.SECTOR_SETS.items():
             assert len(tks) == len(set(tks)), f"{name} 내 중복 티커"
 

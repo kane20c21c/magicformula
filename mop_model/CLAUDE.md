@@ -83,7 +83,11 @@ python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테�
 Kane 지정 섹터 세트별 갭1 상대 상승확률의 **시가총액 가중평균**을 15:15경
 메일+푸시(스윙 포트 방식)로 보고한다. **보고 전용 — 정본 신호는 16:20 run_daily.**
 
-- **세트 정의**: `src/gauge_config.py` (Kane 편집 파일 — 8세트 44종목, 2026-07-30 확정)
+- **세트 정의**: `src/gauge_config.py` (Kane 편집 파일 — **10세트 62종목**, 2026-08-12
+  현재. 2026-07-30 8세트 44종목으로 출발 → 08-12 `K_반.핵심장비`(8)·`T_반도체레`(10) 추가)
+  - ⚠ **세트 간 종목 중복 허용** (Kane 확인 2026-08-12) — 세트별로 독립 집계하고
+    시총 가중은 세트 안에서만 정규화하므로 무방. 현재 4종목 중복(한미반도체·리노공업·
+    이오테크닉스·ISC). 세트가 늘어도 스냅샷은 유니버스 전체를 한 번만 훑으므로 **소요시간 불변**.
 - **러너**: `src/run_gauge.py` — LLV `data_service.fetch_today_ohlcv_snapshot`(잠정
   스냅샷, sleep 0.25초) + `compute_indicators_frame`(지표 37컬럼 정본 재계산) →
   `build_panel(px=…, save=False)` → `build_features(panel_df=…, save=False)` →
