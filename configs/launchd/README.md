@@ -12,6 +12,47 @@ vault 와 동일한 launchd 방식으로 Magic Formula 데일리 시그널을 �
   - 코어 잡(16:30/20:40) **5분 뒤** 실행. universe="extended_all" 로 `daily_extended_signal_*.{json,md}` + `daily_extended_regimes_*.json` 산출. 코어 산출물은 덮어쓰지 않음.
   - 전제: LLV kis_update(16:00/20:30) 가 extend.parquet 까지 적재한 뒤 실행되어야 정확한 Wyckoff 라벨.
 
+- `com.kane.fever-rule-daily.plist` — 평일 **16:30** 발열률 일일 워크포워드
+  (`fever_model/src/daily_WW_wf.py`). LLV 16:00 KIS 종가 배치 뒤. 실측 ~10초.
+- `com.kane.fever-rule-mail.plist` — 평일 **17:00** 발열률 명단 메일
+  (`fever_model/src/send_fever_mail.py`). 계산 없이 산출물만 읽어 발송.
+
+### 발열률 잡 등록 (최초 1회)
+
+```bash
+cd ~/DriveForALL/StoLab/MagicFormula
+# 0) 사전 확인 — 배치가 쓰는 파이썬에 의존성이 있는지
+/usr/local/bin/python3 -c "import pandas, numpy, sklearn, pyarrow, matplotlib; print('ok')"
+#    matplotlib 이 없으면 그래프만 건너뛰고 일지·표는 정상 산출된다 (fail-safe).
+#    설치: /usr/local/bin/python3 -m pip install matplotlib
+
+# 1) 최초 백필 (온도 60거래일) — 이미 2026-08-14 실행 완료
+/usr/local/bin/python3 fever_model/src/daily_WW_wf.py --backfill 60
+
+# 2) 등록 — ⚠ 이 두 잡은 **복사본**으로 등록돼 있다 (2026-08-14, 심링크 아님)
+for L in fever-rule-daily fever-rule-mail; do
+  launchctl bootout gui/$(id -u)/com.kane.$L 2>/dev/null
+  rm -f ~/Library/LaunchAgents/com.kane.$L.plist
+  cp configs/launchd/com.kane.$L.plist ~/Library/LaunchAgents/
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kane.$L.plist
+done
+launchctl list | grep fever-rule       # 둘 다 보여야 정상
+launchctl print gui/$(id -u)/com.kane.fever-rule-daily | head -20   # state/program 확인
+```
+
+⚠ **복사본이라 plist 를 고치면 위 블록을 다시 돌려야 반영된다** (심링크로 등록된
+`com.stolab.magic-formula.*` 와 다른 점). 정본은 여전히 `configs/launchd/`.
+
+**`Bootstrap failed: 5: Input/output error` 가 나오면** — 대개 그 라벨이 이미
+도메인에 올라가 있다는 뜻이다(심링크 거부가 아니다 — 이 맥에서 심링크 등록 잡들은
+정상 동작 중). `launchctl list | grep` 에 라벨이 보이고 `launchctl print` 가
+`state`/`program` 을 제대로 뱉으면 등록된 것이니 에러는 무시해도 된다. 그래도
+깨끗이 하려면 `launchctl bootout` 후 위 블록을 재실행.
+
+수동 테스트: `launchctl kickstart -k gui/$(id -u)/com.kane.fever-rule-daily`
+로그: `fever_model/fever-daily.log` · `fever-mail.log`
+상태 JSON: `~/DriveForALL/StoLab/_status/fever-rule-daily.json` (run_batch.sh 계측)
+
 ### 확장 잡 등록 (최초 1회)
 
 ```bash
