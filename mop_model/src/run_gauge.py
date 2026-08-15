@@ -4,7 +4,7 @@ run_gauge.py — 15:10 잠정 섹터 오버나이트 게이지 (Kane 지시 2026
 ========================================================================
 장 마감 전(15:10) 현재가를 **임시 종가**로 주입해 MOp 챔피언 모델을 그대로
 돌리고, Kane 지정 섹터 세트(gauge_config.SECTOR_SETS)별로 갭1(익일시가/당일종가)
-상대 상승확률의 **시가총액 가중평균**을 계산해 15:15 메일+푸시로 보고한다.
+상대 상승확률의 **지정 가중평균**(Kane 고정가중)을 계산해 15:15 메일+푸시로 보고한다.
 
 파이프라인 (전부 인메모리 — 운영 산출물 무오염):
   1) LLV core+extend 로드, 당일 행 제거 (있다면)
@@ -12,7 +12,7 @@ run_gauge.py — 15:10 잠정 섹터 오버나이트 게이지 (Kane 지시 2026
   3) LLV 지표 37컬럼 재계산 (data_service.compute_indicators_frame, ≈ 10초)
   4) build_panel(px=..., save=False) → build_features(panel_df=..., save=False)
   5) 챔피언 학습(어제까지) → 당일 잠정 행 스코어 (run_daily 와 동일 로직, ≈ 70초)
-  6) 세트별 시총 가중평균 p → output/gauge/gauge_YYYY-MM-DD.json + 메일/푸시
+  6) 세트별 지정 가중평균 p → output/gauge/gauge_YYYY-MM-DD.json + 메일/푸시
 
 ⚠ 잠정치 한계 (설계 전제 — Kane 인지):
   - 15:10 가격은 동시호가(15:20~15:30) 미반영. 거래량도 당일 누적 중간값.
@@ -162,7 +162,7 @@ def gauge(today=None, use_ensemble=True, notify=True, save=True,
     # 시총 (패널 재구성값: ListShrs × 잠정 종가)
     mcap = panel[panel.Date == np.datetime64(today)].set_index("Ticker").MarketCap
 
-    # 6) 세트별 시총 가중평균 (순수 로직 — gauge_core, 테스트 대상)
+    # 6) 세트별 지정 가중평균 (순수 로직 — gauge_core, 테스트 대상)
     from gauge_core import aggregate_sets
     sets_out = aggregate_sets(score.set_index("Ticker"), mcap,
                               gcfg.SECTOR_SETS, names)

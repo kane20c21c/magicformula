@@ -168,7 +168,7 @@ def build_gauge_email(doc: dict) -> tuple[str, str]:
         f"{_pct1(s.get('top_member', {}).get('p'))}</td></tr>"
         for s in sets)
     body = (f"<p><b>{ptime}</b> 잠정 종가 기준, 갭1(익일시가/당일종가) "
-            f"<b>상대 상승확률</b>의 세트 내 시가총액 가중평균입니다.<br>"
+            f"<b>상대 상승확률</b>의 세트 내 지정 가중평균입니다.<br>"
             f"<span style='font-size:12px;color:#777'>확률은 MOp 유니버스 "
             f"{doc.get('universe_count', '—')}종목 내 상대 백분위 — 50% = 시장 중앙. "
             f"동시호가(15:20~15:30) 미반영 잠정치이며 확정 신호는 16:20 정본.</span></p>"

@@ -28,10 +28,15 @@ from gauge_notify import build_gauge_email, build_gauge_push  # noqa: E402
 # gauge_config — 세트 정의 무결성
 # ════════════════════════════════════════════════════════
 class TestGaugeConfig:
-    def test_10sets_62tickers(self):
-        """Kane 확정 2026-07-30 8세트 44종목 → 2026-08-12 10세트 62종목."""
+    def test_10sets_75tickers(self):
+        """8세트 44종목(07-30) → 10세트 62종목(08-12) → 10세트 75종목(08-15)."""
         assert len(gcfg.SECTOR_SETS) == 10
-        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 62
+        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 75
+
+    def test_all_sets_are_weight_dicts(self):
+        """2026-08-15 고정가중 전환 — 세트는 {티커: 가중치} dict 여야 한다."""
+        for name, spec in gcfg.SECTOR_SETS.items():
+            assert isinstance(spec, dict), f"{name} — dict 여야 함 (고정가중)"
 
     def test_ticker_format(self):
         for name, tks in gcfg.SECTOR_SETS.items():
@@ -39,9 +44,28 @@ class TestGaugeConfig:
                 assert isinstance(t, str) and len(t) == 6 and t.isdigit(), \
                     f"{name}/{t} — 6자리 숫자 문자열이어야 함"
 
+    def test_weights_positive_and_near_one(self):
+        """가중치는 양수. 세트 합은 정규화하지 않으므로 반올림 오차 ±0.02 허용."""
+        for name, spec in gcfg.SECTOR_SETS.items():
+            for t, w in spec.items():
+                assert isinstance(w, (int, float)) and w > 0, f"{name}/{t} 가중치"
+            s = sum(spec.values())
+            assert 0.98 <= s <= 1.02, f"{name} 가중치 합 {s:.4f} — 1.0 에서 이탈"
+
+    def test_renamed_and_removed(self):
+        """2026-08-15 개편 — K_조선레 개칭 + 삭제 종목 반영."""
+        assert "S_조선레" in gcfg.SECTOR_SETS
+        assert "K_조선레" not in gcfg.SECTOR_SETS
+        assert "000150" not in gcfg.SECTOR_SETS["K_반.핵심장비"]   # 두산
+        assert "000500" not in gcfg.SECTOR_SETS["T_전력기기"]      # 가온전선
+        for t in ("403870", "357780", "095340"):                   # HPSP·솔브레인·ISC
+            assert t not in gcfg.SECTOR_SETS["T_반도체레"]
+        assert "403870" in gcfg.SECTOR_SETS["K_반.핵심장비"]        # HPSP 는 이동
+
     def test_no_dup_within_set(self):
         # ⚠ 세트 '간' 중복은 의도된 것 (Kane 2026-08-12) — 세트별 독립 집계라
         #    같은 종목이 여러 세트에 들어가도 무방하다. 여기선 세트 '안' 만 본다.
+        #    dict 라 키 중복은 구조적으로 불가하나, list 회귀 시를 대비해 남긴다.
         for name, tks in gcfg.SECTOR_SETS.items():
             assert len(tks) == len(set(tks)), f"{name} 내 중복 티커"
 
@@ -102,6 +126,76 @@ class TestAggregateSets:
         s = out[0]
         assert s["weighted_p"] is None and s["mean_p"] is None
         assert s["n_scored"] == 0
+
+
+# ════════════════════════════════════════════════════════
+# gauge_core — 고정가중 (Kane 전환 2026-08-15, 정본 경로)
+# ════════════════════════════════════════════════════════
+class TestFixedWeights:
+    def test_fixed_weight_ignores_mcap(self):
+        """dict 세트면 시총을 무시하고 지정 가중치를 쓴다. 0.7·0.8+0.3·0.4=0.68"""
+        by = _score_df([("000001", "A", 0.8, 1, 100.0, False),
+                        ("000002", "B", 0.4, 2, 50.0, False)])
+        mcap = pd.Series({"000001": 1e12, "000002": 1.0})   # 시총은 극단적으로 편향
+        out = aggregate_sets(by, mcap, {"S": {"000001": 0.7, "000002": 0.3}},
+                             {"000001": "A", "000002": "B"})
+        s = out[0]
+        assert s["weight_mode"] == "fixed"
+        assert s["weighted_p"] == pytest.approx(0.68)
+        assert s["weight_sum"] == pytest.approx(1.0)
+        assert s["members"][0]["weight"] == pytest.approx(0.7)
+        assert s["members"][0]["weight_def"] == pytest.approx(0.7)
+
+    def test_set_sum_not_normalized(self):
+        """합이 0.99 인 세트는 그대로 0.99 배가 실린다 (Kane 결정 — 정규화 없음)."""
+        by = _score_df([("000001", "A", 1.0, 1, 100.0, False)])
+        out = aggregate_sets(by, pd.Series({"000001": 100.0}),
+                             {"S": {"000001": 0.99}}, {})
+        assert out[0]["weighted_p"] == pytest.approx(0.99)
+        assert out[0]["weight_sum"] == pytest.approx(0.99)
+
+    def test_missing_member_weight_redistributed(self):
+        """유니버스 밖 종목의 가중치는 남은 종목에 비례 재분배 (세트 합 보존)."""
+        by = _score_df([("000001", "A", 0.8, 1, 100.0, False),
+                        ("000002", "B", 0.4, 2, 50.0, False)])
+        mcap = pd.Series({"000001": 100.0, "000002": 100.0})
+        out = aggregate_sets(
+            by, mcap,
+            {"S": {"000001": 0.5, "000002": 0.3, "999999": 0.2}},
+            {"999999": "유니버스밖"})
+        s = out[0]
+        assert s["n_members"] == 3 and s["n_scored"] == 2
+        assert s["weight_sum"] == pytest.approx(1.0)          # 0.8 → 1.0 으로 복원
+        assert s["members"][0]["weight"] == pytest.approx(0.5 / 0.8)
+        assert s["weighted_p"] == pytest.approx((0.5 * 0.8 + 0.3 * 0.4) / 0.8)
+        gone = [m for m in s["members"] if m["p"] is None][0]
+        assert gone["name"] == "유니버스밖" and gone["weight"] is None
+        assert gone["weight_def"] == pytest.approx(0.2)
+
+    def test_fixed_zfill(self):
+        by = _score_df([("000660", "SK하이닉스", 0.9, 1, 100.0, False)])
+        out = aggregate_sets(by, pd.Series({"000660": 100.0}), {"S": {660: 1.0}}, {})
+        assert out[0]["n_scored"] == 1 and out[0]["weighted_p"] == pytest.approx(0.9)
+
+    def test_fixed_all_missing(self):
+        out = aggregate_sets(_score_df([]), pd.Series(dtype=float),
+                             {"S": {"111111": 1.0}}, {})
+        s = out[0]
+        assert s["weighted_p"] is None and s["weight_sum"] == 0.0
+
+    def test_real_config_runs(self):
+        """실제 gauge_config 로 집계가 통과하는지 (스모크)."""
+        rows, mc = [], {}
+        for i, t in enumerate(sorted({t for s in gcfg.SECTOR_SETS.values() for t in s})):
+            rows.append((t, f"N{i}", 0.5, i + 1, 1000.0, False))
+            mc[t] = 1e9
+        out = aggregate_sets(_score_df(rows), pd.Series(mc),
+                             gcfg.SECTOR_SETS, {})
+        assert len(out) == 10
+        for s in out:
+            assert s["weight_mode"] == "fixed"
+            # 전원 스코어 → 지정 합이 그대로, p 전부 0.5 → weighted_p = 합 × 0.5
+            assert s["weighted_p"] == pytest.approx(s["weight_sum"] * 0.5)
 
 
 # ════════════════════════════════════════════════════════
