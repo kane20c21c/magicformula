@@ -1,9 +1,17 @@
 {
-  "$schema_note": "Kane 개인 매매 전략 확정 스펙. 맥미니 데이터수집/모니터링 프로젝트에서 로드하여 매일 신호를 계산하는 용도. 사람용 설명은 STRATEGY.md, 계산 로직은 strategy_reference.py 참조.",
+  "$schema_note": "Kane 개인 매매 전략 확정 스펙. 맥미니 데이터수집/모니터링 프로젝트에서 로드하여 매일 신호를 계산하는 용도. 사람용 설명은 STRATEGY.md, 진입 계산 로직은 strategy_reference.py, 청산 정본은 StockPortfolio/app/paper/config.py 참조.",
   "strategy_id": "kr_pullback_largecap_foreign",
   "name": "대형·고외국인 눌림목 진입 전략",
-  "version": "1.0.0",
-  "confirmed_date": "2026-07-05",
+  "version": "1.2.2.3",
+  "version_scheme": {
+    "format": "모델.유니버스.진입규칙.청산규칙 — 각 자리는 최초 설정이 1, 조정할 때마다 +1",
+    "model_1": "기본 아이디어 불변 — 좋은 유니버스 안에서의 매수 타이밍",
+    "universe_2": "①4조/25% (2026-07 실운영 — 문서 원안 5조/30%는 운영된 적 없음) → ②4조/30% (2026-08-17)",
+    "shadow_mode": "직전 운영 모델 v1.1.1.2 (4조/25% · 60일/MA120 · 시간연동 4분기)를 다음 달 모델 평가까지 그림자 추적 — shadow_track.py (Kane 지시 2026-08-17)",
+    "entry_2": "①60일 고점·MA120 (2026-07-05) → ②40일 고점·MA200 (2026-08-17, W1)",
+    "exit_3": "①고정 −20% (2026-07-05) → ②시간연동 4분기 (2026-08-01) → ③시간연동 × 변동배율 (2026-08-16)"
+  },
+  "confirmed_date": "2026-08-17",
   "timezone": "Asia/Seoul",
   "market": "KRX (KOSPI/KOSDAQ)",
   "purpose": "종목 선택이 아니라 '좋은 유니버스 안에서의 매수 타이밍' 전략. 개인 투자자(무한자본 불가·손절 사용)의 실거래 제약을 반영. 지수 초과가 목표가 아니라, 평시 방어력과 위험조정 수익을 목표로 함.",
@@ -15,40 +23,42 @@
     "apply_window": "next_month",
     "eligibility_forward_fill": "daily",
     "filters": {
-      "market_cap_min_krw": 5000000000000,
-      "market_cap_min_label": "5조원",
+      "market_cap_min_krw": 4000000000000,
+      "market_cap_min_label": "4조원",
       "foreign_ownership_ratio_min_pct": 30.0
     },
-    "notes": "두 조건 모두 충족(AND). foreign_ratio는 전체 상장주식 중 외국인 보유 지분율(%). 보유 중 종목이 유니버스를 이탈해도 강제청산하지 않고, 손절 규칙에 걸릴 때까지 보유."
+    "notes": "두 조건 모두 충족(AND). foreign_ratio는 전체 상장주식 중 외국인 보유 지분율(%). 보유 중 종목이 유니버스를 이탈해도 강제청산하지 않고, 손절 규칙에 걸릴 때까지 보유.",
+    "rationale_v2": "2026-08-17 W1 진입 기준 눈금 스윕: 시총·외인 어느 쪽이든 완화하면 단조 악화 (4조/15% MDD −52.5%, 2조/25% −39.7%, 2조/15% 원금 손실). 외인 필터는 위기 방어 필터로 작동 (완화 시 코로나 손익 +2,774만→+201만 붕괴). 4조/30%는 최종 2.03억/Sharpe 0.68로 4조/25%(1.91억/0.60) 대비 우위. 5조/30%는 Sharpe 0.73/MDD −16.8%로 방어 최우수였으나 Kane 이 자본활용(투자비중 26%→30%)을 고려해 4조/30% 채택."
   },
 
   "entry": {
-    "description": "120일 추세 위에서 발생한 '새로운' 눌림목에만 진입.",
+    "description": "MA200 추세 위에서 발생한 40일 고점 대비 10% '새로운' 눌림에만 진입. (v1.x.2 — W1, 2026-08-17)",
     "signal_timing": "close_of_day_t",
-    "execution_timing": "close_of_day_t_plus_1",
+    "execution_timing": "open_of_day_t_plus_1",
     "conditions": {
-      "trend_filter": "close > SMA(close, 120)",
-      "pullback": "close <= 0.90 * ROLLING_MAX(close, 60)",
-      "pullback_label": "60일 고점 대비 10% 이상 하락",
+      "trend_filter": "close > SMA(close, 200)",
+      "pullback": "close <= 0.90 * ROLLING_MAX(close, 40)",
+      "pullback_label": "40일 고점 대비 10% 이상 하락",
       "fresh_onset_only": true,
       "onset_definition": "진입조건이 오늘 True 이고 전일 False 인 첫날(중복 진입 방지)"
     },
-    "notes": "신호는 t일 종가로 확정되고 t+1일 종가에 매수. 신규매수와 불타기(추가매수) 모두 이 진입조건(onset)을 사용."
+    "notes": "신호는 t일 종가로 확정되고 t+1일에 매수. 신규매수와 불타기(추가매수) 모두 이 진입조건(onset)을 사용.",
+    "rationale_v2": "2026-08-17 재현율 연구: 눌림 후 반등 기회의 60%가 'MA120 아래'에서 발생하나 추세필터 제거·완화는 재앙(MDD −68~−76%) — 놓친 기회 대부분은 사후적 기회일 뿐. 유일하게 견고한 개선이 추세선 연장(MA200)과 창 단축(40일). 40일 창은 저변동 박스권에서 한물간 고점 기준의 저질 신호를 걸러 평시 손실을 1/3로 줄임(−1,097만→−380만, 4조/25% 기준). MA 곡선·창 곡선 모두 비단조이므로 40·200이라는 정확한 값에 과신 금물. 상세: reports/스윙포트_진입패턴연구_20260817.html"
   },
 
   "exit": {
-    "description": "고점 대비 20% 추적손절. 당일 종가 체결.",
-    "type": "trailing_stop",
-    "trail_pct": 0.20,
-    "rule": "close <= peak_since_entry * (1 - 0.20) 이면 청산",
-    "peak_basis": "position",
-    "peak_basis_note": "불타기로 여러 슬롯을 담은 포지션이라도 포지션 전체의 보유중 최고가 하나를 기준으로 함(트랜치별 아님).",
-    "execution_timing": "close_of_day_t",
-    "execution_note": "손절선이 깨진 당일(t) 종가에 즉시 매도(Kane 확정: 당일 손절). t+1 지연 아님.",
-    "final_liquidation": {
-      "applies_to": "backtest_and_ledger_only",
-      "rule": "마지막날 종가 전량청산(평가/원장 목적). 실거래에는 해당 없음."
-    }
+    "description": "시간연동 4분기 × 종목 변동배율 (청산규칙 3번째, 2026-08-16 확정).",
+    "type": "time_linked_vol_scaled_trailing_stop",
+    "canonical_source": "StockPortfolio/app/paper/config.py (stop_* / vol_* 필드) — 이 JSON 은 요약만 담는다",
+    "rule_summary": {
+      "vol_scale": "종목 YZ_20(신호일) ÷ 직전 252거래일 스윙풀 YZ_20 중앙값의 중앙값 (LLV data/vol_scale.json, 클립 0.2~5.0, 미가용 시 1.0)",
+      "early_D0_to_D5": "참조가 × (1 − clip(0.20 × 배율, 0.10, 0.40))",
+      "late_peak_above_avg": "피크 × (1 − clip(0.05 × 배율, 0.03, 0.15))",
+      "late_peak_below_avg": "평단 × (1 − clip(0.10 × 배율, 0.05, 0.25))",
+      "notes": "참조가 = 피크>평단 이면 피크, 아니면 평단. D+ 는 거래일, entry_date=최근 매수일(불타기 시 리셋). 익절 없음."
+    },
+    "deprecated_v1_trail_pct": 0.20,
+    "deprecated_note": "trail_pct 0.20 은 v1.0.0 백테스트 원안 값 — 운영값 아님. strategy_reference.check_trailing_stop 도 동일하게 잔재."
   },
 
   "portfolio": {
@@ -75,8 +85,8 @@
     "when": "num_signals > num_free_slots",
     "rank_by": "pullback_depth",
     "order": "descending",
-    "pullback_depth_formula": "(ROLLING_MAX(close,60) - close) / ROLLING_MAX(close,60)",
-    "note": "눌림이 깊은 종목 우선. (시총 큰 순은 2026 멜트업에서 열등 → 채택 안 함)"
+    "pullback_depth_formula": "(ROLLING_MAX(close,40) - close) / ROLLING_MAX(close,40)",
+    "note": "눌림이 깊은 종목 우선. ('여력 큰 순'은 2026-08-17 검증에서 P=0.040 유일 유의였으나 매수 95.8% 동일 상태의 소수 결정 의존이라 보류)"
   },
 
   "reentry": {
@@ -91,25 +101,23 @@
     "cash_settlement": "T+1",
     "cash_settlement_note": "매도 대금은 다음 거래일에 현금화(그날 매수에는 사용 불가). 급락일에 팔아 급등일에 되사는 왕복을 억제.",
     "buy_cash_source": "available_cash_only",
-    "transaction_cost_per_side_pct": 0.003,
-    "transaction_cost_round_trip_pct": 0.006,
-    "cost_note": "편도 0.3%(수수료+세금+슬리피지 근사). 왕복 0.6%."
+    "backtest_costs_note": "규칙 비교는 라이브 조건으로 — 매수 t+1 시가, 손절 체결 청산가격×99.5%, 왕복 0.23% (매수 0.015% / 매도 0.015%+세금 0.2%). 구 관례(종가 체결·왕복 0.6%)는 고회전 규칙을 부당하게 불리하게 만든다."
   },
 
   "lookbacks": {
-    "high_window_days": 60,
-    "high_window_min_periods": 30,
-    "trend_ma_days": 120,
-    "trend_ma_min_periods": 80
+    "high_window_days": 40,
+    "high_window_min_periods": 20,
+    "trend_ma_days": 200,
+    "trend_min_periods": 140
   },
 
   "daily_procedure": [
-    "1) 유니버스 갱신: 최신 월말 시총·외국인지분율로 5조&30% 종목 집합 산출, 일별로 유지(ffill).",
-    "2) 지표 계산: 각 종목의 60일 고점, 120일 이동평균, 눌림깊이.",
-    "3) 진입신호(t 종가): entry = (close<=0.9*high60) & (close>ma120) & 유니버스포함. onset = entry가 전일 False→오늘 True.",
-    "4) 손절 점검(보유중, 당일 종가): close <= 보유중고점*0.8 이면 오늘 종가 매도.",
-    "5) 불타기(보유중): onset 재발생 & 종목슬롯<2 & 전체슬롯<20 이면 추가매수(t+1 종가).",
-    "6) 신규매수(t+1 종가): onset 종목 중 쿨다운(1일) 통과분을 눌림깊은 순으로, 빈 슬롯 채울 때까지. 정수주, 가용현금 한도.",
+    "1) 유니버스 갱신: 최신 월말 시총·외국인지분율로 4조&30% 종목 집합 산출, 일별로 유지(ffill).",
+    "2) 지표 계산: 각 종목의 40일 고점, 200일 이동평균, 눌림깊이.",
+    "3) 진입신호(t 종가): entry = (close<=0.9*high40) & (close>ma200) & 유니버스포함. onset = entry가 전일 False→오늘 True.",
+    "4) 손절 점검(보유중): 청산규칙 3번째 — SP paper engine.stop_state 정본 (시간연동 4분기 × 변동배율).",
+    "5) 불타기(보유중): onset 재발생 & 종목슬롯<2 & 전체슬롯<20 이면 추가매수(t+1).",
+    "6) 신규매수(t+1): onset 종목 중 쿨다운(1일) 통과분을 눌림깊은 순으로, 빈 슬롯 채울 때까지. 정수주, 가용현금 한도.",
     "7) 자금: 매도대금은 T+1 현금화."
   ],
 
@@ -118,7 +126,7 @@
     "daily_price": {
       "fields": ["date", "ticker", "close"],
       "optional_fields": ["open", "high", "low", "volume"],
-      "note": "close만 있으면 신호 계산 가능. 최소 과거 120거래일 필요(추세·고점 워밍업)."
+      "note": "close만 있으면 신호 계산 가능. 최소 과거 200거래일 필요(추세·고점 워밍업)."
     },
     "monthly_marketcap": {
       "fields": ["date(month_end)", "ticker", "mktcap_krw"],
@@ -131,36 +139,52 @@
   },
 
   "rejected_options": {
-    "description": "오늘 테스트했으나 채택하지 않은 것들. 다른 프로젝트에서 재추가하지 말 것.",
+    "description": "테스트했으나 채택하지 않은 것들. 다른 프로젝트에서 재추가하지 말 것. (v1.0.0 기각분 + 2026-08-17 진입 연구 기각분)",
     "volume_entry_filter": "거래량 급증(MA5의 125%/150%) 진입 필터: 평시 승률↑(35→41%)이나 2026 멜트업에서 −4,700~5,700만 손해. 레짐 베팅이라 제외.",
     "volume_exit_relax": "저거래(MA5의 75% 이하) 시 청산 보류: 두 레짐에서 중립~약손해. 제외.",
     "relative_stop_vs_index": "지수 대비 −5% 상대손절: 이전 검토서 기각.",
     "cooldown_alternatives": "쿨다운 0/2/3/5일: 0은 멜트업 몰빵·평시 취약, 2일+는 두 레짐 다 열등. 1일이 공동 최적.",
-    "candidate_priority_by_mktcap": "후보 우선순위 '시총 큰 순': 2026에서 눌림깊은순보다 열등(15%손절 기준 1,810 vs 4,531).",
-    "pyramiding_max3": "불타기 3슬롯: 2026에서 max2와 사실상 동일, 평시 오히려 손해. max2 채택."
+    "candidate_priority_by_mktcap": "후보 우선순위 '시총 큰 순': 2026에서 눌림깊은순보다 열등.",
+    "candidate_priority_by_trend_margin": "후보 우선순위 '추세 여력 큰 순': P=0.040 유일 유의였으나 매수 95.8% 동일 상태에서 약 75건 결정에 이익 집중 + 전반(2015~2020) 개선 0 — 보류 (2026-08-17).",
+    "pyramiding_max3": "불타기 3슬롯: 2026에서 max2와 사실상 동일, 평시 오히려 손해. max2 채택.",
+    "trend_filter_removal": "추세필터 제거/완화(−5~−20% 허용): 재현율은 오르나 최종 0.65~0.95억·MDD −68~−76% 재앙. 놓친 기회의 60%(MA120 아래)는 사후적 기회일 뿐 (2026-08-17).",
+    "onset_resignal": "같은 눌림 구간 내 N일 간격 재신호: MDD −29%→−40% 악화 — 눌림 진행 중 물타기가 됨 (2026-08-17).",
+    "bounce_confirmation": "하락 멈춤 확인 후 진입(전일比 상승/2일 연속/종가 상단/MA5, 대기 3~20일): 20조합 전부 기준선 열등 — 투자비중만 하락 (2026-08-17).",
+    "vol_normalized_pullback": "눌림 임계 변동성 정규화 clip(0.10×배율): 12조합 전부 열등. 고정 10%가 최적 (6/8/12/15% 전부 열등 재확인) (2026-08-17).",
+    "low_proximity_pattern": "저점 근접(종가≤직전 N일 저점×1.1~1.3) 눌림 정의: 신호수준 36조합 전패(정밀도 20% vs 36%) + 포트폴리오 MDD −77.7%. 바닥 기는 종목과 건강한 눌림을 구분 못함 (2026-08-17).",
+    "new_low_breakdown_pattern": "신저가 이탈(종가≤직전 N일 저점×0.9/0.8): 추세필터와 양립 불가 — 전 조합 신호 30건 미만 (2026-08-17).",
+    "tiered_deep_entry": "깊이별 계단 진입(−10/−20/−30% 첫 돌파마다 onset): −30% 티어의 초과이익은 물타기 115건에서 나옴(금지 시 소멸) + 연 5건 미만 표본. −20% 티어(신규한정)는 건전하나 증분 +0.05억으로 미미 — 미채택 (2026-08-17).",
+    "short_high_window_20d": "20일 고점 창: 신호수준 정밀도는 최고이나 포트폴리오 최악(1.41억) (2026-08-17).",
+    "universe_relaxation": "유니버스 완화(4조→2조 / 25%→15%): 네 방향 모두 단조 악화. 외인 완화는 위기 취약성 폭증(코로나 +201만·MDD −52.5%), 시총 완화는 전 레짐 균일 악화 (2026-08-17)."
   },
 
   "backtest_performance": {
-    "disclaimer": "아래는 Kane repo의 실수집 데이터(pykrx)로 돌린 백테스트 결과이며 미래 수익 보장이 아님. 룩어헤드 방지(신호 t→매수 t+1), 비용 0.6% 왕복, 정수주, T+1 반영. 원장은 마지막날 전량청산 기준.",
+    "disclaimer": "korean_mkt_study/backtest.py (2026-08-17 신설) 실행 결과이며 미래 수익 보장이 아님. 룩어헤드 방지(신호 t→매수 t+1 시가), 손절 체결 청산가격×99.5%, 왕복 0.23%, 정수주, T+1. 청산 v1.2.0(=청산규칙 3번째) 적용.",
     "full_period": {
-      "window": "2020-01-02 ~ 2026-06-30",
-      "final_value_krw": 270180000,
-      "profit_krw": 169840000,
-      "cagr_pct": 16.5,
-      "sharpe": 0.97,
-      "max_drawdown_pct": -32.8
+      "window": "2015-01-02 ~ 2026-06-30",
+      "final_value_krw": 203000000,
+      "cagr_pct": 6.34,
+      "sharpe": 0.68,
+      "max_drawdown_pct": -23.2,
+      "avg_invested_pct": 30.4,
+      "n_buys": 1500,
+      "win_rate_pct": 42.4
     },
     "regime_windows": {
-      "meltup_2026_H1": {"window": "2026-01-02 ~ 2026-06-30", "profit_krw": 84890000, "win_rate_pct": 42},
-      "normal_2020_2023": {"window": "2020-01-02 ~ 2023-12-30", "profit_krw": 16820000, "win_rate_pct": 35}
+      "normal_2015_2019": {"profit_krw": -12750000, "mdd_pct": -20.8},
+      "covid_2020_2021": {"profit_krw": 30250000, "mdd_pct": -10.3},
+      "bear_2022_2023": {"profit_krw": -6300000, "mdd_pct": -11.0},
+      "meltup_2024_2026H1": {"profit_krw": 89750000, "mdd_pct": -10.2}
     },
-    "benchmark_note": "프로젝트 대결론: 단일 모멘텀/이 전략은 KOSPI200을 '총수익'으로는 못 이김(지수 우위는 2023~26 소수 반도체 멜트업이 만든 것). 이 전략의 가치는 총수익이 아니라 평시 방어·위험조정·개인 실거래 적합성에 있음."
+    "statistical_note": "블록 부트스트랩(20일·5,000회)에서 v1.0.0 대비 수익률 유의차 없음(P≈0.3) — 이 전략군 공통. 판단 근거는 MDD·Sharpe·레짐 일관성.",
+    "report": "StockPortfolio/reports/스윙포트_진입패턴연구_20260817.html · 스윙포트_진입신호검증_20260817.html"
   },
 
   "known_limitations": [
-    "데이터 floor: 가격/모멘텀 신호는 2014년부터 신뢰 가능(그 이전 종목 커버리지 부족).",
-    "성과는 레짐 의존적: 2026 성과는 소수 대형 반도체 상승에 크게 기인.",
+    "데이터 floor: 가격/모멘텀 신호는 2014년부터 신뢰 가능(그 이전 종목 커버리지 부족). v1.2.2.3 검증 구간은 2015-01~2026-06.",
+    "성과는 레짐 의존적: W1 진입은 평시·하락 방어형 — 멜트업 총수익은 60일 창(T1) 대비 낮다 (의도된 트레이드오프).",
     "월 1회 유니버스 갱신 → 월중 시총/지분율 급변은 다음 월말에야 반영.",
-    "당일 종가 손절은 종가를 알아야 그 종가에 체결하는 경미한 lookahead 가정(Kane 동의)."
+    "MA 기간·창 곡선이 비단조(MA150·MA140~160 골짜기) — 40일·MA200 이라는 정확한 좌표는 고원의 봉우리일 수 있어 과신 금물.",
+    "백테스트 투자비중은 슬롯 500만 고정(비복리) 기준이라 절대 수준이 보수적으로 표시됨."
   ]
 }

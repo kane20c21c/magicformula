@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	  스윙 포트 그림자 추적 v1.1.1.2 — 평일 20:35 KST (Kane 지시 2026-08-17).
+	  LLV 20:30 KIS 종가 배치(수급 포함 확정본) 직후 당일 EOD 를 재현한다.
+
+	  본 모델 v1.2.2.3 전환 시점(2026-08-14 상태)에서 분기한 구모델
+	  (4조/25% · 60일 고점/MA120 · 시간연동 4분기 배율없음)을 매일 갱신 —
+	  다음 달 모델 평가에서 실계정과 비교 (python3 shadow_track.py =report).
+	  (XML 주석 제약으로 이중하이픈을 =로 표기)
+
+	  산출물: korean_mkt_study/data/shadow_v1112_{state.json,equity.csv}
+	  멱등: 하루 실패해도 다음 실행이 밀린 거래일을 순서대로 전부 처리.
+
+	  설치 (맥에서 1회):
+	    ln -sf ~/DriveForALL/StoLab/MagicFormula/configs/launchd/com.kane.kms-shadow-track.plist \
+	      ~/Library/LaunchAgents/
+	    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kane.kms-shadow-track.plist
+	-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.kane.kms-shadow-track</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/StockPortfolio/scripts/infra/run_batch.sh</string>
+		<string>kms-shadow-track</string>
+		<string>/usr/local/bin/python3</string>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/korean_mkt_study/shadow_track.py</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/korean_mkt_study/shadow-track.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/korean_mkt_study/shadow-track.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Weekday</key><integer>1</integer>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>35</integer>
+		</dict>
+		<dict>
+			<key>Weekday</key><integer>2</integer>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>35</integer>
+		</dict>
+		<dict>
+			<key>Weekday</key><integer>3</integer>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>35</integer>
+		</dict>
+		<dict>
+			<key>Weekday</key><integer>4</integer>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>35</integer>
+		</dict>
+		<dict>
+			<key>Weekday</key><integer>5</integer>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>35</integer>
+		</dict>
+	</array>
+</dict>
+</plist>

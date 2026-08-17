@@ -1,22 +1,36 @@
-"""strategy_reference.py — 대형·고외국인 눌림목 진입 전략 참조 구현 (v1.0.0, 확정 2026-07-05).
+"""strategy_reference.py — 대형·고외국인 눌림목 진입 전략 참조 구현.
+
+**v1.2.2.3 (확정 2026-08-17)** — 버전 체계: 모델.유니버스.진입규칙.청산규칙
+(각 자리는 최초 설정이 1, 조정할 때마다 +1)
+  모델 1      : 기본 아이디어 불변 (좋은 유니버스 안에서의 눌림목 매수 타이밍)
+  유니버스 2  : ①4조/25% (실운영 설정 — 문서 원안 5조/30% 는 운영된 적 없음)
+                → ②**4조/30%** (2026-08-17 조정)
+  진입규칙 2  : ①60일 고점·MA120 → ②**40일 고점·MA200** (W1, 2026-08-17 조정)
+  청산규칙 3  : ①고정 −20% → ②시간연동 4분기 (2026-08-01) →
+                ③**시간연동 × 변동배율** (2026-08-16)
+
+직전 운영 모델은 **v1.1.1.2** — 다음 달 모델 평가까지 그림자 모드로 추적한다
+(korean_mkt_study/shadow_track.py, Kane 지시 2026-08-17).
 
 목적: Kane의 맥미니 데이터수집/실시간 모니터링 프로젝트가 그대로 import 하여
-      '오늘 어떤 종목이 유니버스에 있고 / 진입신호가 떴고 / 보유 종목이 손절선에 닿았는지'를
-      계산하는 데 쓰는 순수 함수 모음. 백테스트와 동일한 신호 정의를 보장한다.
+      '오늘 어떤 종목이 유니버스에 있고 / 진입신호가 떴는지'를 계산하는 순수 함수 모음.
+      백테스트(korean_mkt_study/backtest.py)와 동일한 신호 정의를 보장한다.
 
 의존성: pandas, numpy 뿐. (외부 상태·네트워크·파일 없음)
 
 핵심 규약 (STRATEGY.md / strategy_spec.json 과 일치):
-  - 신호는 t일 종가로 확정 → 매수는 t+1일 종가 (룩어헤드 방지).
-  - 손절은 당일(t) 종가 체결 (Kane 확정: 당일 손절).
-  - 유니버스: 월말 시총 5조 & 외국인지분 30% (다음 달 적용, 일별 ffill).
-  - 진입: 120일선 위 + 60일 고점 대비 10%↑ 눌림, '새 눌림(onset)'만.
+  - 신호는 t일 종가로 확정 → 매수는 t+1일 (룩어헤드 방지).
+  - 유니버스: 월말 시총 **4조** & 외국인지분 **30%** (다음 달 적용, 일별 ffill).
+  - 진입: **MA200 위** + **40일 고점 대비 10%↑ 눌림**, '새 눌림(onset)'만.
   - 후보 우선순위: 눌림 깊은 순.
   - 재진입 쿨다운: 1거래일 (판 그날만 금지).
-  - 포트: N=20, 종목당 max 2슬롯(불타기), 슬롯 500만 / 총 1억, 정수주, 비용 0.3%/편도, T+1.
+  - 포트: N=20, 종목당 max 2슬롯(불타기), 슬롯 500만 / 총 1억, 정수주, T+1.
+  - ⚠ 청산 정본은 이 파일이 아니라 **StockPortfolio/app/paper/config.py** (청산규칙
+    3번째 — 시간연동 4분기 × 변동배율). 여기 check_trailing_stop / TRAIL_STOP_PCT 는
+    v1.0.0 백테스트 원안의 잔재로 하위호환용으로만 남김.
 
 데이터 입력 스키마 (Kane repo data/*.parquet 과 동일):
-  - close_wide      : DataFrame, index=거래일(DatetimeIndex), columns=ticker, 값=종가(원). 최소 120거래일 워밍업.
+  - close_wide      : DataFrame, index=거래일(DatetimeIndex), columns=ticker, 값=종가(원). 최소 200거래일 워밍업.
   - mktcap_monthly  : DataFrame, index=월말일, columns=ticker, 값=시가총액(원).
   - foreign_monthly : DataFrame, index=월말일, columns=ticker, 값=외국인지분율(%). 0~100 스케일.
 """
@@ -31,18 +45,18 @@ import pandas as pd
 # ────────────────────────────────────────────────────────────────────────────
 # 확정 파라미터 (strategy_spec.json 과 동일. JSON을 로드해 덮어써도 됨)
 # ────────────────────────────────────────────────────────────────────────────
-STRATEGY_VERSION = "1.0.0"
+STRATEGY_VERSION = "1.2.2.3"
 
-MKTCAP_MIN_KRW = 5_000_000_000_000     # 유니버스 시총 하한 (5조원)
+MKTCAP_MIN_KRW = 4_000_000_000_000     # 유니버스 시총 하한 (4조원) — v1.2.x
 FOREIGN_MIN_PCT = 30.0                 # 유니버스 외국인지분율 하한 (%)
 
-HIGH_WINDOW = 60                       # 눌림 기준 고점 창
-HIGH_MIN_PERIODS = 30
-TREND_MA = 120                         # 추세 필터 이동평균
-TREND_MIN_PERIODS = 80
-PULLBACK_RATIO = 0.90                  # close <= 0.90*high60  (10% 눌림)
+HIGH_WINDOW = 40                       # 눌림 기준 고점 창 — v1.x.2 (60→40, 2026-08-17)
+HIGH_MIN_PERIODS = 20
+TREND_MA = 200                         # 추세 필터 이동평균 — v1.x.2 (120→200, 2026-08-17)
+TREND_MIN_PERIODS = 140
+PULLBACK_RATIO = 0.90                  # close <= 0.90*high_n  (10% 눌림 — 불변)
 
-TRAIL_STOP_PCT = 0.20                  # 고점 대비 20% 추적손절
+TRAIL_STOP_PCT = 0.20                  # ⚠ deprecated — v1.0.0 잔재. 청산 정본은 SP paper config
 CAPITAL_KRW = 100_000_000              # 1억
 MAX_POSITIONS = 20                     # N 슬롯
 SLOT_KRW = 5_000_000                   # 슬롯당 500만
@@ -85,32 +99,37 @@ def to_daily_eligibility(monthly_elig: pd.DataFrame, daily_index: pd.DatetimeInd
 # ────────────────────────────────────────────────────────────────────────────
 @dataclass
 class Indicators:
-    high60: pd.DataFrame
-    ma120: pd.DataFrame
-    depth: pd.DataFrame        # (high60 - close)/high60 : 눌림 깊이(0~1)
+    # 필드명은 v1.0.0 하위호환 유지 — high60 은 HIGH_WINDOW(현재 40일) 고점,
+    # ma120 은 TREND_MA(현재 200일) 이동평균을 담는다. 소비자는 onset/depth 만 사용.
+    high60: pd.DataFrame       # HIGH_WINDOW 일 롤링 최고 종가
+    ma120: pd.DataFrame        # TREND_MA 일 이동평균 (추세 필터)
+    depth: pd.DataFrame        # (고점 - close)/고점 : 눌림 깊이(0~1)
     entry: pd.DataFrame        # 진입 조건 충족(bool)  — 유니버스 반영 전/후는 인자로 결정
     onset: pd.DataFrame        # '새 눌림' 첫날(bool)
 
 
 def compute_indicators(close_wide: pd.DataFrame, elig_daily: Optional[pd.DataFrame] = None) -> Indicators:
-    """가격 패널로부터 60일고점·120일선·눌림깊이·진입·onset 계산.
+    """가격 패널로부터 HIGH_WINDOW 고점·TREND_MA 추세선·눌림깊이·진입·onset 계산.
 
     elig_daily 를 주면 진입조건에 유니버스 편입 여부까지 AND 한다(권장).
+    v1.2.2.3: HIGH_WINDOW=40, TREND_MA=200 (필드명은 하위호환으로 유지).
     """
-    high60 = close_wide.rolling(HIGH_WINDOW, min_periods=HIGH_MIN_PERIODS).max()
-    ma120 = close_wide.rolling(TREND_MA, min_periods=TREND_MIN_PERIODS).mean()
-    depth = (high60 - close_wide) / high60
+    high_n = close_wide.rolling(HIGH_WINDOW, min_periods=HIGH_MIN_PERIODS).max()
+    ma_trend = close_wide.rolling(TREND_MA, min_periods=TREND_MIN_PERIODS).mean()
+    depth = (high_n - close_wide) / high_n
 
-    cond = (close_wide <= PULLBACK_RATIO * high60) & (close_wide > ma120)
+    cond = (close_wide <= PULLBACK_RATIO * high_n) & (close_wide > ma_trend)
     if elig_daily is not None:
         cond = cond & elig_daily.reindex(index=close_wide.index, columns=close_wide.columns).fillna(False)
     entry = cond.fillna(False)
     onset = entry & ~entry.shift(1).fillna(False)   # 전일 False → 오늘 True
-    return Indicators(high60, ma120, depth, entry, onset)
+    return Indicators(high_n, ma_trend, depth, entry, onset)
 
 
 def check_trailing_stop(peak_price: float, current_close: float, trail_pct: float = TRAIL_STOP_PCT) -> bool:
-    """추적손절 발동 여부. 보유중 최고가(peak) 대비 current_close 가 trail_pct 이상 하락하면 True."""
+    """⚠ deprecated (v1.0.0 잔재) — 청산 정본은 StockPortfolio/app/paper/config.py
+    (청산규칙 3번째: 시간연동 4분기 × 변동배율, engine.stop_state).
+    추적손절 발동 여부. 보유중 최고가(peak) 대비 current_close 가 trail_pct 이상 하락하면 True."""
     if peak_price is None or np.isnan(peak_price) or np.isnan(current_close):
         return False
     return current_close <= peak_price * (1.0 - trail_pct)
