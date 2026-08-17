@@ -126,5 +126,18 @@ if __name__ == "__main__":
     ap.add_argument("--rebuild", action="store_true", help="panel/features 재생성 후 신호")
     ap.add_argument("--no-save", action="store_true")
     a = ap.parse_args()
+
+    # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
+    if a.date is None:
+        import sys as _sys
+        try:
+            from stolab_data import is_trading_day
+            _today = datetime.now(tz=KST).date()
+            if not is_trading_day(_today):
+                print(f"[mop-signal] {_today} 휴장일 — 종료")
+                _sys.exit(0)
+        except Exception as _e:
+            print(f"[mop-signal] 휴장일 체크 실패({_e}) — 계속 진행")
+
     signal(today=a.date, use_ensemble=not a.lgbm_only,
            rebuild=a.rebuild, save=not a.no_save)
