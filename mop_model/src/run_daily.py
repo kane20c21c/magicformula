@@ -128,16 +128,29 @@ if __name__ == "__main__":
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
+    #
+    # ⚠ LLV 를 sys.path 에 넣어주는 게 핵심이다 (2026-08-18 수정).
+    #   이 배치는 mop_model/.venv 로 도는데 거기엔 stolab_data 가 설치돼 있지 않다.
+    #   그래서 도입(2026-08-17) 이후 매 실행마다 ModuleNotFoundError → except 로
+    #   빠져 "계속 진행" 했고, 가드가 한 번도 작동한 적이 없었다.
+    #   경로 정본은 config.LLV_PATH (환경변수 LLV_PATH 로 덮어쓸 수 있음).
     if a.date is None:
         import sys as _sys
         try:
+            import config as _cfg
+            if _cfg.LLV_PATH not in _sys.path:
+                _sys.path.insert(0, _cfg.LLV_PATH)
             from stolab_data import is_trading_day
             _today = datetime.now(tz=KST).date()
             if not is_trading_day(_today):
                 print(f"[mop-signal] {_today} 휴장일 — 종료")
                 _sys.exit(0)
+            print(f"[mop-signal] {_today} 거래일 — 계속")
         except Exception as _e:
-            print(f"[mop-signal] 휴장일 체크 실패({_e}) — 계속 진행")
+            # ⚠ fail-open 이다 (거래일에 배치를 막지 않는 게 우선). 대신 실패를 눈에
+            #   띄게 남긴다 — 종전엔 조용히 지나가 가드가 죽은 걸 아무도 몰랐다.
+            print(f"[mop-signal] ⚠️ 휴장일 체크 실패({type(_e).__name__}: {_e}) "
+                  f"— 가드 없이 계속 진행", file=_sys.stderr)
 
     signal(today=a.date, use_ensemble=not a.lgbm_only,
            rebuild=a.rebuild, save=not a.no_save)
