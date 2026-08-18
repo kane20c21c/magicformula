@@ -88,17 +88,91 @@ def send_email(subject: str, html: str) -> bool:
 
 _PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 
+# ── Pushover 앱 분리 (2026-08-18 Kane 지시) ──────────────────────────────
+# 섹터 게이지는 **손절경보 앱**으로 보낸다 (Kane 확정 — 15:10 잠정 게이지는
+# 장 마감 전에 즉시 봐야 하는 정보라 우선순위가 높아야 한다. 초안의 매매신호
+# → 브리핑 → 손절경보 순으로 바뀌었다).
+# 손절경보·시스템 앱은 **앱 단위로 priority 가 high(1) 로 강제**된다 —
+# 정본은 MB push_sender.HIGH_PRIORITY_APPS, 아래 자립 경로도 같은 규칙을 지킨다.
+# 앱→토큰 라우팅 정본도 MB push_sender 이고 여기서는 위임한다.
+# 못 읽으면 자립 경로로 내려가 종전처럼 단일 토큰으로 보낸다.
+APP_STOP = "stop"
+APP_BRIEF = "brief"
+_HIGH_PRIORITY_APPS = frozenset({"stop", "system"})
+_APP_ENV_FALLBACK = {"watch": "PUSHOVER_TOKEN_WATCH",
+                     "signal": "PUSHOVER_TOKEN_SIGNAL",
+                     "stop": "PUSHOVER_TOKEN_STOP",
+                     "brief": "PUSHOVER_TOKEN_BRIEF",
+                     "system": "PUSHOVER_TOKEN_SYSTEM"}
 
-def send_push(title: str, message: str) -> bool:
+_MB_UNLOADED = object()
+_mb_send_push = _MB_UNLOADED
+
+
+def _load_mb_send_push():
+    """MB lib/push_sender 를 단독 로드 (lib/__init__ 의 무거운 import 우회).
+
+    sys.modules 에 'lib' 같은 흔한 이름을 심지 않고 전용 이름으로 감싼다.
+    실패는 한 번만 판정하고 기억한다.
+    """
+    global _mb_send_push
+    if _mb_send_push is not _MB_UNLOADED:
+        return _mb_send_push
+    _mb_send_push = None
+    try:
+        import importlib.util
+        import sys
+        import types
+
+        mb_root = Path(os.getenv("MORNING_BRIEF_PATH")
+                       or (_STOLAB / "MorningBrief"))
+        lib_dir = mb_root / "scripts" / "lib"
+        if not (lib_dir / "push_sender.py").exists():
+            logger.error("[gauge.notify] MB push_sender 없음(%s) — 자립 경로 사용",
+                         lib_dir)
+            return None
+        pkg_name = "_mb_lib"
+        if pkg_name not in sys.modules:
+            pkg = types.ModuleType(pkg_name)
+            pkg.__path__ = [str(lib_dir)]
+            sys.modules[pkg_name] = pkg
+        mod_name = f"{pkg_name}.push_sender"
+        if mod_name in sys.modules:
+            _mb_send_push = sys.modules[mod_name].send_push
+            return _mb_send_push
+        spec = importlib.util.spec_from_file_location(
+            mod_name, lib_dir / "push_sender.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        _mb_send_push = mod.send_push
+    except Exception as e:
+        logger.error("[gauge.notify] MB push_sender 로드 실패(%s) — 자립 경로 사용", e)
+        _mb_send_push = None
+    return _mb_send_push
+
+
+def send_push(title: str, message: str, app: str = APP_STOP,
+              priority: int = 0) -> bool:
     _load_env()
+    mb = _load_mb_send_push()
+    if mb is not None:
+        try:
+            return bool(mb(title, message, priority=priority, html=True, app=app))
+        except Exception as e:
+            logger.error("[gauge.notify] MB 위임 실패(%s) — 자립 경로 재시도", e)
     user_key = os.getenv("PUSHOVER_USER_KEY", "")
-    api_token = os.getenv("PUSHOVER_API_TOKEN", "")
+    legacy = os.getenv("PUSHOVER_API_TOKEN", "")
+    api_token = os.getenv(_APP_ENV_FALLBACK.get(app, ""), "") or legacy
     if not (user_key and api_token):
         logger.warning("[gauge.notify] PUSHOVER 키 미설정 — 푸시 생략")
         return False
+    if app in _HIGH_PRIORITY_APPS:
+        priority = max(priority, 1)
     payload = {
         "token": api_token, "user": user_key,
         "title": title[:250], "message": message[:1024], "html": 1,
+        "priority": max(-2, min(priority, 1)),
     }
     try:
         data = urllib.parse.urlencode(payload).encode("utf-8")
