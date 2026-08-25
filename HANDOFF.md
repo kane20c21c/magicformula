@@ -62,7 +62,8 @@ t일 종가 신호 → t+1일 시가 매수. 슬롯 20 × 5,000,000원(백테스
 
 ```
 배율 = 종목 YZ_20(신호일) ÷ 직전 252거래일 스윙풀 YZ_20 중앙값의 중앙값
-       (LLV data/vol_scale.json, 클립 0.2~5.0, 미가용 시 1.0)
+       (LLV data/vol_scale.json, 클립 0.2~5.0, 미가용·10거래일 초과 낡음 → 1.0)
+스윙풀 = korean_mkt_study/data/universe_*.json 중 apply_month 최신 (현재 41종목)
 D+0~5           참조가 × (1 − clip(0.20 × 배율, 0.10, 0.40))
 D+6~ 피크>평단   피크   × (1 − clip(0.05 × 배율, 0.03, 0.15))
 D+6~ 피크≤평단   평단   × (1 − clip(0.10 × 배율, 0.05, 0.25))
@@ -106,7 +107,10 @@ plist 정본은 `configs/launchd/`, 운영본은 `~/Library/LaunchAgents/` 심�
 ✅ `[실측]` 종전 "`~/DriveForALL/StoLab/StockPortfolio/SCHEDULED_TASKS.md` 에
 `kms-shadow-track` 누락" 은 **해소**. 같은 점검에서 `longlivevault-{foreign-0811,
 volscale-2050, derivatives-merge}` 3건도 빠져 있어 함께 채웠고, 등재 레이블을
-`launchctl list` 와 대조해 **38개**로 맞췄다 — 현재 누락 0.
+`launchctl list` 와 대조해 **38개**로 맞췄다 — **레이블** 누락 0.
+(레이블 대조는 끝났지만 시각 표기까지 전수 검증한 것은 아니다. 실제로
+`executions-hourly` 의 "08:45~19:45" 표기가 plist 와 달라 2026-08-25 정정했다 —
+17:45·18:45 은 발화하지 않는다. 시각이 의심되면 plist 를 직접 볼 것.)
 
 ### 2.3 최근 산출 확인 `[실측]` (2026-08-25 기준)
 
@@ -312,6 +316,7 @@ v1.1.1.2, 데이는 R1/R2/R3 세 규칙. **다음 달 모델 평가 때 같은 �
 | ⚠ day-shadow 배치 **수리 후 자동 실행 검증** | 오늘(08-25) 20:55 | `[실측]` 08-24 20:55 자동 실행은 `FileNotFoundError` 로 **실패(exit=1)** 했고 수리 커밋은 그 뒤 **23:37**(`3f9cdf3`). 데이터는 수동 캐치업으로 채워졌지만 **수리 후 자동 실행은 아직 0회** — 첫 성공을 확인해야 한다 |
 | 스윙 포트 그림자 v1.1.1.2 | 다음 달 모델 평가 시 | 상태파일 정상 (보유 16종목) |
 | 발열률 8/7 빈티지 채점 | **9월 4일경**(20거래일) · 11월 초(60거래일) | 예정만 잡혀 있음. `탄력점수_V2_채점_20260813.xlsx` 방식 재채점 |
+| **스윙 유니버스 9월분 재산출** | **9월 초** (월말 기준 → 다음 달 적용) | `[문서]` 현행 `universe_2026-08_4jo_30pct.json` 의 note — "기준일이 2026-06-30 이라 이후 지분율 변동(예: 6/30에 28%→7월 31%)은 미반영". **MagicFormula `korean_mkt_study` 소관**이고, LLV `vol_scale` 의 분모가 이 파일을 따라가므로 미루면 손절폭이 옛 풀 기준으로 굳는다 (§7.1 역방향 의존) |
 
 ### 5.3 C — 잔손질 `[실측]` `[세션]`
 
@@ -403,7 +408,7 @@ Wyckoff는 황금률의 5번째 점수 요소가 아니라 **게이트**다. `[�
 
 | 상대 | 위치 | 관계 |
 |---|---|---|
-| **longlivevault (LLV)** | `~/DriveForALL/StoLab/longlivevault` | **읽기 전용.** OHLCV·지표 45컬럼·Wyckoff·수급·`ticker_classification.json`·`data/vol_scale.json` 공급. 진입점은 `magic_formula/_vault.py` |
+| **longlivevault (LLV)** | `~/DriveForALL/StoLab/longlivevault` | **거의 읽기 전용.** OHLCV·지표 45컬럼·Wyckoff·수급·`ticker_classification.json`·`data/vol_scale.json` 공급. 진입점은 `magic_formula/_vault.py`. ⚠ **역방향 의존 1건** — 아래 참조 |
 | **StockPortfolio (SP)** | `~/DriveForALL/StoLab/StockPortfolio` | 신호 소비자 + **청산 규칙 실행 정본**. 8000 포트 |
 | **hillstorm** | `~/DriveForALL/StoLab/hillstorm` | Wyckoff 분류 엔진 (LLV가 위임 호출) |
 | **homalone (아웃퍼포머)** | 8501 포트 | 화면 — Quickview(황금률) · Temp.View(발열률) |
@@ -414,19 +419,51 @@ Wyckoff는 황금률의 5번째 점수 요소가 아니라 **게이트**다. `[�
 ⚠ **MagicFormula는 LLV에 쓰지 않는다.** 판단은 여기, 데이터는 LLV — 이 분업을 깨면
 `_upsert_and_recompute` 계약과 충돌한다.
 
+⚠⚠ **역방향 의존 — LLV가 MagicFormula 파일을 읽는 곳이 하나 있다** `[실측]`
+
+```
+LLV stolab_data/vol_scale.py:94
+  → korean_mkt_study/data/universe_*.json  (apply_month 가 가장 늦은 파일)
+  → 그 종목 풀의 YZ_20 중앙값이 변동배율 분모 D(t)
+  → 스윙 포트 가상계좌 + 실계좌 3개(깨비·원둘·미래)의 손절폭
+```
+
+즉 **월별 유니버스 파일은 MagicFormula가 소유하지만 실계좌 손절폭을 좌우한다.**
+파일명 규칙을 바꾸거나 파일이 유실되면 LLV가 조용히 옛 달 풀을 집고, 분모가
+바뀌어 **손절폭이 통째로 어긋나는데 값이 그럴듯해 경고도 안 뜬다**
+(2026-08-25 LLV `9fe874a` 가 선택 키를 `base_date` → `(apply_month, base_date,
+파일명)` 으로 고친 이유 — 종전엔 실질 타이브레이커가 파일명 알파벳 순서였다).
+
+→ 그래서 `.gitignore` 가 `korean_mkt_study/data/*` 를 무시하면서도
+`!korean_mkt_study/data/universe_*.json` 예외를 둔다. **이 예외를 지우지 말 것.**
+
 ### 7.2 데이터·API `[문서]`
 
 | 원천 | 경유 | 용도 |
 |---|---|---|
 | KIS (한국투자증권) | LLV `kis_fetcher` | 일봉·분봉·현재가·계좌·체결. NXT 소급 분봉(`FHKST03010230`) |
 | KRX Open API | LLV `krx_fetcher` | 전종목 일별·옵션/선물·지수 |
-| pykrx (KRX 스크래핑) | LLV `investor_flow` · `foreign_holding` | 수급 백필 · 외국인 지분율 |
+| pykrx (KRX 스크래핑) | LLV `investor_flow` · `foreign_holding` | 수급 백필 · 외국인 지분율. ⚠ **현재 차단** — 아래 |
 | 토스 / KB | LLV `toss_fetcher` · `kb_fetcher` | 시세 백업 · 계좌 |
 | Gmail SMTP · Pushover · Telegram | MorningBrief `push_sender` | 신호·게이지·발열률 통지 |
 
 MagicFormula 자체는 외부 API를 직접 부르지 않는다 — **전부 LLV·MorningBrief 경유**다.
 예외는 `mop_model`이 쓰는 LLV `data_service.fetch_today_ohlcv_snapshot`(15:10 잠정
 스냅샷)뿐이고 이것도 LLV 진입점이다. `[문서]`
+
+⚠⚠ **pykrx 경로가 KRX 비밀번호 만료로 막혀 있다** (2026-08-25 LLV 세션 발견).
+일별 운영은 무사하다 — 수급 일별은 KIS, 외국인 일별은 토스가 1차라서. 막히는 건
+**백필류와 폴백**이다: `backfill_investor.py` · `backfill_marketcap.py` ·
+`backfill_foreign_holding.py` · `update_foreign_holding.py --source pykrx`(폴백).
+
+**MagicFormula 에 걸리는 지점 2곳** `[의견]`
+
+1. **§5.1 의 "2020~2022 약세장 구간 백필"** — 황금률 재설계의 2순위 과제인데
+   이 경로에 의존한다. 착수 전에 KRX 자격증명부터 갱신해야 한다.
+2. 외국인 지분율은 지금 **토스 단일 원천**이다. 토스가 죽으면 대안이 없고,
+   스윙 포트 유니버스의 30% 필터가 이 값을 쓴다.
+
+상세·복구 절차는 LLV `HANDOFF.md` §5-② 소관.
 
 ### 7.3 런타임 `[문서]` `[실측]`
 

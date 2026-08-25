@@ -44,7 +44,15 @@ docs/holdtiming/archive_llv_*/
 korean_mkt_study/data/*
 korean_mkt_study/out/
 
-# 예외: 그림자 추적 상태는 작고(~10KB) 다음 달 모델 평가의 근거라 추적한다.
+# 예외 ①: 그림자 추적 상태는 작고(~10KB) 다음 달 모델 평가의 근거라 추적한다.
 # 유실되면 v1.1.1.2 대비 비교를 재현할 수 없다 (평일 20:35 kms-shadow-track 산출).
 !korean_mkt_study/data/shadow_v1112_state.json
 !korean_mkt_study/data/shadow_v1112_equity.csv
+
+# 예외 ②: 월별 유니버스 정의 — ⚠⚠ 반드시 추적한다 (2026-08-25 추가).
+# 이 파일은 MagicFormula 가 소유하지만 **LLV vol_scale.py 가 읽는 입력**이다
+# (`glob("universe_*.json")` → apply_month 최신 파일 = 변동배율 분모 D(t) 의 스윙풀).
+# 무시하면 다음 달 파일이 조용히 git 밖에 남고, 기계를 옮겼을 때 vol_scale 이
+# 옛 달 풀을 집어 **실계좌 3개의 손절폭이 통째로 어긋나는데 값이 그럴듯해
+# 경고도 안 뜬다** — LLV CLAUDE.md 가 경고한 바로 그 실패 모드다.
+!korean_mkt_study/data/universe_*.json
