@@ -56,3 +56,7 @@ korean_mkt_study/out/
 # 옛 달 풀을 집어 **실계좌 3개의 손절폭이 통째로 어긋나는데 값이 그럴듯해
 # 경고도 안 뜬다** — LLV CLAUDE.md 가 경고한 바로 그 실패 모드다.
 !korean_mkt_study/data/universe_*.json
+
+# 재설계 검증 패널 캐시 (재생성 가능 — build 서브커맨드)
+output/area_redesign_panel.parquet
+output/redesign_pos52_panel.parquet

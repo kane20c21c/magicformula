@@ -9,11 +9,32 @@ analysis/area_scores.py
 영역별 확정 spec (docs/area_specs/*.md)
 ---------------------------------------
 - 추세 (trend):     Dv2(정30/크30/기40) + invert_dist_off_bull (breadth 레짐)
-- 모멘텀 (momentum): RSI 10/90 극단 trend 단독 (레짐 없음)
+- 모멘텀 (momentum): (RSI(14) − 50) / 5 — 연속 선형 (레짐 없음)        ← v3
 - 거래량 (volume):   bear-only (Q2+Q3+OBV_contra) (quickregime)
-- 변동성 (volatility): BB×52주×레짐 결합 점수표 (quickregime)
+- 변동성 (volatility): 52주 위치 0.6 + BB %B 꺾임 0.4 (레짐 미사용)     ← v3
 
 모두 ±10 풀스케일. 레짐 인자는 시점별 라벨 Series 로 주입.
+
+v3 (2026-08-25) — COMBINED-v3-2026-08
+--------------------------------------
+근거: `StockPortfolio/reports/황금률_전구간_재검증_20260824.html` §5·§6·§14
+재현·검증: `scripts/validate_area_redesign.py`
+
+v2 는 상위 3% 20일 상대수익이 4개 연도 모두 음수였다(코어 67 기준 −1.29%, 0/4).
+주원인은 변동성 점수표가 52주 **저점** 버킷에 최고점을 준 것 — 만든 구간에서도
+틀린 평가 기준 오류다. v3 로 +4.30% (4/4, p<0.001).
+
+⚠ **이 종합점수는 예측 모델이 아니라 상위 선별기다.**
+   20일 상대수익과의 순위상관(IC)은 +0.007(p=0.25)로 유의하지 않다. 실질 이득은
+   10분위 중 최상위에 몰려 있다. "점수가 높을수록 수익이 좋다" 로 읽으면 안 된다.
+   (v2 는 IC −0.015, p=0.0004 로 **유의하게 음수**였다 — 부호는 뒤집혔다.)
+
+⚠ 구버전 함수는 롤백용으로 남겨 뒀다 —
+   score_momentum_step() / score_volatility_table() / COMBINED_WEIGHTS_V2.
+
+⚠ 모든 검증 수치는 유니버스 205종목 **현재 명단**(생존편향) · 2023-05~2026-08
+   **초강세장** 구간에서 나왔다. point-in-time 재검증과 약세장 백필 전에는
+   확정값으로 쓰지 말 것 (HANDOFF §5.1).
 """
 
 from __future__ import annotations
@@ -50,7 +71,31 @@ def score_trend(df: pd.DataFrame, regime_ser: pd.Series) -> pd.Series:
 # ===========================================================================
 
 def score_momentum(df: pd.DataFrame) -> pd.Series:
-    """RSI 5-band 극단(10/90) trend, ±10. 레짐 없음 (상시)."""
+    """
+    RSI(14) 를 ±10 으로 선형 매핑. (RSI − 50) / 5. 레짐 없음 (상시).
+
+    v3 (2026-08-25) — 구 5-band 계단에서 연속 선형으로 교체.
+    자유 파라미터가 없다: RSI 0~100 이 그대로 −10~+10 에 얹힌다.
+
+    왜 바꿨나
+    ---------
+    계단은 고유값이 0/±5/±10 셋뿐이라 모멘텀 비중 80% 에서 **꼭대기 변별이
+    안 된다**. 상위 3% 20일 상대수익 +3.00% → +4.45% (4/4 연도 양수).
+    기울기 k 를 3.5~6.0 으로 흔들어도 +4.42~4.48% 로 평탄 — 칼날 최적점이 아니다.
+
+    ⚠ 이 축은 20일 상대수익과의 **순위상관(IC)이 0 이다** (+0.001, p=0.86).
+      전체 순위를 맞히는 축이 아니라 **꼭대기를 고르는 축**이다. 점수가 높을수록
+      수익이 좋다고 읽으면 안 된다 — 8~10분위에서만 올라간다.
+
+    구 계단은 score_momentum_step() 으로 보존 (롤백용).
+    """
+    if len(df) < 35:
+        return pd.Series(0.0, index=df.index)
+    return _clip((_rsi(df["Close"]) - 50.0) / 5.0).fillna(0.0)
+
+
+def score_momentum_step(df: pd.DataFrame) -> pd.Series:
+    """구 v2 — RSI 5-band 극단(10/90) trend, ±10. 롤백용 보존."""
     if len(df) < 35:
         return pd.Series(0.0, index=df.index)
     rsi = _rsi(df["Close"])
@@ -121,7 +166,43 @@ def score_volume(df: pd.DataFrame, regime_ser: pd.Series) -> pd.Series:
 # ===========================================================================
 
 def score_volatility(df: pd.DataFrame, regime_ser: pd.Series) -> pd.Series:
-    """BB %B × 52주 위치 × 레짐 결합 점수표 (±10). quickregime."""
+    """
+    52주 위치(0.6) + BB %B 꺾임 반영(0.4). ±10. **레짐을 쓰지 않는다.**
+
+    v3 (2026-08-25) — 구 BB×52주×레짐 결합 점수표에서 교체 (08-24 리포트 후보 A2).
+
+    왜 바꿨나
+    ---------
+    구 점수표는 52주 **저점** 버킷에 최고점을 주고 있었고, 그 방향이 만든 구간
+    (in-sample) 에서도 틀렸다. 종합점수 IC 가 4개 연도 모두 음수였던 주원인이다.
+    교체 후 상위 3% 20일 상대수익 −0.89% → +2.41%, 4/4 연도 양수, p<0.001.
+
+    BB 구간 임계(1.0/0.8/0.6/0.2/0)는 실측 꺾임 지점에서 왔다. 밴드를 **돌파한**
+    구간(>1.0)에 3점만 주는 게 핵심 — 상위 5% 의 38% 가 밴드 돌파 종목인데
+    이들 수익(+1.72%)이 밴드 상단 구간(+2.03%)보다 낮다.
+
+    ⚠ regime_ser 는 호출 계약 유지를 위해 받기만 하고 쓰지 않는다.
+    ⚠ 52주:BB 배분은 둔감하다 — 0.8:0.2~0.4:0.6 에서 MDD −18.3~−20.7%,
+      Sharpe 2.21~2.48 로 평탄. 0.6:0.4 는 그 고원 안의 한 점이다.
+
+    구 점수표는 score_volatility_table() 으로 보존 (롤백용).
+    """
+    p52 = VLV._pos_52w(df)
+    bb = VLV._bb_pctb(df)
+    s52 = (p52 - 0.5) * 20.0
+    sbb = pd.Series(
+        np.select(
+            [bb > 1.0, bb >= 0.8, bb >= 0.6, bb >= 0.2, bb >= 0.0],
+            [    3.0,     10.0,      5.0,      0.0,     -3.0],
+            default=2.0,
+        ),
+        index=df.index,
+    )
+    return _clip(0.6 * s52 + 0.4 * sbb).fillna(0.0)
+
+
+def score_volatility_table(df: pd.DataFrame, regime_ser: pd.Series) -> pd.Series:
+    """구 v2 — BB %B × 52주 위치 × 레짐 결합 점수표 (±10). 롤백용 보존."""
     return VLV.score_joint_regime(df, regime_ser)
 
 
@@ -173,9 +254,24 @@ def make_regimes(stock_data: dict[str, pd.DataFrame]) -> tuple[pd.Series, pd.Ser
 # 종합 점수 — robust 가중치 + Markdown 게이트 (결합 시스템 단일 진입점)
 # ===========================================================================
 
-# 확정 가중치 (M4 분석 2026-05-30, robust grid search 최적)
-# 그리드 robust(상위5제외) 최적: T20/M20/Vu0/Va60
-COMBINED_WEIGHTS = {"trend": 0.2, "momentum": 0.2, "volume": 0.0, "volatility": 0.6}
+# 확정 가중치 v3 (2026-08-25) — T0/M80/Vu0/Va20
+#
+# 08-24 리포트 §6 walk-forward 5/5 fold 동일 배합. 실측으로도 고원이다 —
+# M50→M80 은 단조 개선이고 M80~M100 은 평탄(누적 +1,281~1,302%). M80 이
+# MDD 최저(−18.7%)·Sharpe 최고(2.36) 라 그 자리를 택했다.
+# 추세를 되살리면 단조 악화: T0 −18.7% → T10 −22.2% → T20 −29.4% (MDD).
+#
+# ⚠ 추세·거래량은 계산은 계속 하되 종합점수에 들어가지 않는다 (가중 0).
+#   Quickview 4영역 배지는 그대로 보이지만 뒤 둘은 참고값이다.
+# ⚠ 구 v2 배합은 T20/M20/Vu0/Va60 — configs/active_strategy_v2.yaml 에 보존.
+COMBINED_WEIGHTS = {"trend": 0.0, "momentum": 0.8, "volume": 0.0, "volatility": 0.2}
+COMBINED_WEIGHTS_V2 = {"trend": 0.2, "momentum": 0.2, "volume": 0.0, "volatility": 0.6}
+
+# 임계는 v2 그대로 유지한다 — 실측이 지지한다.
+# 임계별 실운용(슬롯10·t+1시가·왕복0.43%): 4.5 −34.0% / 5.0 −25.8% / 5.5 −21.4%
+# / 6.0 −20.4% / 6.5 −19.9% / 7.0 −16.7% (MDD). 누적·Sharpe 는 6.0 이 최고
+# (+1,365%, 2.41). MDD 가 임계에 대해 **단조**라 이 스윕은 믿을 만하다.
+# 신호량은 일평균 11.4 → 5.0 종목으로 줄지만 신호 있는 날이 81.6% 라 무방.
 COMBINED_THRESHOLD = 6.0   # 확정 (5.0 후보)
 GATE_EXCLUDE_PHASES = ("Markdown",)   # 매수 제외 국면
 
