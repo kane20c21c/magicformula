@@ -49,17 +49,15 @@ from pathlib import Path
 # vault 경로 탐색 + sys.path 등록
 # ---------------------------------------------------------------------------
 
-_MAGIC_ROOT = Path(__file__).resolve().parent.parent  # Magic Formula/
+PROJECT_ROOT = Path(__file__).resolve().parents[1]   # MagicFormula/
+STOLAB_ROOT = PROJECT_ROOT.parent                    # StoLab/
 
-_VAULT_CANDIDATES = [
-    _MAGIC_ROOT.parent / "longlivevault",                       # 형제 폴더 (환경 독립)
-    Path("/Users/kaneyoun/DriveForALL/StoLab/longlivevault"),   # 절대 경로 fallback
-]
+# vault 는 StoLab/ 아래 형제 저장소. 미니(운영)/에어(개발) 양쪽 모두
+# "StoLab/<저장소명>" 구조가 동일하므로 절대 경로 fallback 은 필요 없다.
+VAULT_PATH: Path = STOLAB_ROOT / "LongLiveVault"
 
-VAULT_PATH: Path = next(
-    (p for p in _VAULT_CANDIDATES if p.exists()),
-    _VAULT_CANDIDATES[0],
-)
+# 하위 호환 alias (기존 코드가 _MAGIC_ROOT 를 참조할 수 있음)
+_MAGIC_ROOT = PROJECT_ROOT
 
 if str(VAULT_PATH) not in sys.path:
     sys.path.insert(0, str(VAULT_PATH))

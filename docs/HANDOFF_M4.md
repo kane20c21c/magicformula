@@ -137,20 +137,25 @@ KOSPI.parquet 이 빠지면 백테스트는 돌긴 하지만 알파 메트릭이
 
 > **Xcode CLI 의 진짜 역할** : VS Code 같은 에디터 UI 와 별개로, macOS 시스템 컴파일러/git/Homebrew 의존성. 클로이 코딩 자체에는 직접 필요 없음. `git --version` 과 `python3 --version` 이 둘 다 동작하면 명시적 설치 단계는 건너뛰어도 됨.
 
-### 2-5. 경로 의존성 — 사용자명/폴더명 유지
+### 2-5. 경로 의존성 — 형제 폴더 배치만 지키면 됨
 
-코드에 **하드코딩된 절대경로** 가 있음. Mac.Air에서도 동일하게 유지하면 코드 수정 0:
+**하드코딩된 절대경로는 제거됐다** (머신 무관 리팩토링). 이제 파이썬 코드는
+`Path(__file__).resolve().parents[N]` 로 저장소 루트를 잡고, 다른 저장소는
+`STOLAB_ROOT = PROJECT_ROOT.parent` 기준 형제 폴더로 찾는다.
+
+따라서 **사용자명·상위 경로가 달라도 코드 수정이 필요 없다.**
+지켜야 할 유일한 조건은 두 저장소가 같은 `StoLab/` 아래 형제로 있는 것:
 
 ```
-~/DriveForALL/StoLab/Magic Formula/
-~/DriveForALL/StoLab/longlivevault/
+StoLab/
+├── MagicFormula/
+└── LongLiveVault/
 ```
 
-확인된 하드코딩 위치:
-
-- `scripts/run_analysis.py:23` — `_VAULT_PATH = Path("/Users/kaneyoun/DriveForALL/StoLab/longlivevault")`
-
-사용자명이 바뀐다면 위 경로 1곳을 치환해야 함. (launchd plist 의 경로들은 시나리오 A 에서는 Mac.Air에 안 등록하므로 무시.)
+- 맥미니(운영) `~/DriveForALL/StoLab/…` · 맥에어(개발) `~/Dev/StoLab/…` 둘 다 동작.
+- 해당 위치: `magic_formula/_vault.py`, `scripts/{run_analysis,daily_signal,daily_extended_signal}.py`
+- ⚠ launchd plist 는 여전히 리터럴 절대경로다 (맥미니 전용). 시나리오 A 에서는
+  Mac.Air 에 등록하지 않으므로 무시.
 
 ---
 

@@ -23,8 +23,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_MAGIC_ROOT = Path(__file__).resolve().parent.parent
-_VAULT_PATH = Path("/Users/kaneyoun/DriveForALL/StoLab/longlivevault")
+# vault 는 StoLab/ 아래 형제 저장소 — 머신(미니/에어) 무관하게 상대 경로로 찾는다.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]   # MagicFormula/
+STOLAB_ROOT = PROJECT_ROOT.parent                    # StoLab/
+_MAGIC_ROOT = PROJECT_ROOT
+_VAULT_PATH = STOLAB_ROOT / "LongLiveVault"
 for p in [str(_MAGIC_ROOT), str(_VAULT_PATH)]:
     if p not in sys.path:
         sys.path.insert(0, p)

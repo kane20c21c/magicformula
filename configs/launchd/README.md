@@ -56,19 +56,19 @@ launchctl print gui/$(id -u)/com.kane.fever-rule-daily | head -20   # state/prog
 ### 확장 잡 등록 (최초 1회)
 
 ```bash
-ln -sf "/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/configs/launchd/com.stolab.magic-formula.daily-extended-signal.plist" \
+ln -sf "~/DriveForALL/StoLab/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-extended-signal.plist" \
        ~/Library/LaunchAgents/com.stolab.magic-formula.daily-extended-signal.plist
 launchctl load ~/Library/LaunchAgents/com.stolab.magic-formula.daily-extended-signal.plist
 launchctl list | grep magic-formula        # daily-signal + daily-extended-signal 둘 다 보여야 정상
 ```
 수동 테스트: `launchctl start com.stolab.magic-formula.daily-extended-signal`
-또는 `python "/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_extended_signal.py"`. 로그: `output/logs/daily_extended_signal.{out,err}`.
+또는 `python "~/DriveForALL/StoLab/MagicFormula/scripts/daily_extended_signal.py"`. 로그: `output/logs/daily_extended_signal.{out,err}`.
 
 ## 등록 (최초 1회)
 
 ```bash
 # 1) ~/Library/LaunchAgents/ 로 심볼릭 링크
-ln -sf "/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/configs/launchd/com.stolab.magic-formula.daily-signal.plist" \
+ln -sf "~/DriveForALL/StoLab/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-signal.plist" \
        ~/Library/LaunchAgents/com.stolab.magic-formula.daily-signal.plist
 
 # 2) launchd 에 로드
@@ -98,7 +98,7 @@ launchctl start com.stolab.magic-formula.daily-signal
 또는 그냥 스크립트 직접:
 
 ```bash
-python "/Users/kaneyoun/DriveForALL/StoLab/Magic Formula/scripts/daily_signal.py"
+python "~/DriveForALL/StoLab/MagicFormula/scripts/daily_signal.py"
 ```
 
 ## 로그 확인
