@@ -46,7 +46,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))          # fever_model/src
 FM   = os.path.dirname(BASE)                               # fever_model
 DATA = os.path.join(FM, "data")
 OUT  = os.path.join(FM, "output")
-STOLAB = os.path.dirname(os.path.dirname(FM))              # ~/DriveForALL/StoLab
+STOLAB = os.path.dirname(os.path.dirname(FM))              # StoLab/ (저장소의 상위)
 LLV  = os.environ.get("LLV_DIR", os.path.join(STOLAB, "longlivevault"))
 OHLCV = os.path.join(LLV, "data", "ohlcv")
 

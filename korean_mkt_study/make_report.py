@@ -355,7 +355,7 @@ tr.base td{{background:#eef1f4;font-weight:600}}
 
     A('<h2>8. 재현</h2>')
     A('<pre style="background:#f5f5f5;padding:12px;border-radius:4px;font-size:12.5px">'
-      'cd ~/DriveForALL/StoLab/MagicFormula/korean_mkt_study\n'
+      'cd &lt;MagicFormula 저장소&gt;/korean_mkt_study\n'
       'python3 backtest.py         # 기준선 1회\n'
       'python3 diag_recall.py      # §2 재현율 진단\n'
       'python3 diag_entry.py       # 신호 전방수익 분해\n'

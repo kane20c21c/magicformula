@@ -13,6 +13,7 @@ config.py — MOp 모델 경로/상수/하이퍼파라미터 (단일 진실 출�
   신호가 약해(AUC~0.55) 튜닝은 노이즈 적합 → 홀드아웃 악화. 보수적 기본값이 최적.
 """
 import os
+from pathlib import Path
 
 # ── 경로 ─────────────────────────────────────────────────────────────
 BASE_DIR = os.environ.get("MOP_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,9 +21,11 @@ OUT_DIR  = os.path.join(BASE_DIR, "build")            # panel/features 산출물
 SIGNAL_DIR = os.path.join(BASE_DIR, "output", "signals")   # 일별 신호 JSON
 
 # LLV 정본 직결 (복사본 없음)
-LLV_PATH = os.environ.get(
-    "LLV_PATH",
-    os.path.expanduser("~/DriveForALL/StoLab/longlivevault"),
+# 기본값은 StoLab/ 아래 형제 저장소 — 머신(미니/에어) 무관 상대 경로.
+# ⚠ MOP_DIR 오버라이드와 무관하게 __file__ 기준으로 따로 계산한다.
+_STOLAB_ROOT = Path(__file__).resolve().parents[3]   # StoLab/
+LLV_PATH = os.path.expanduser(
+    os.environ.get("LLV_PATH") or str(_STOLAB_ROOT / "LongLiveVault")
 )
 CORE   = os.path.join(LLV_PATH, "data", "ohlcv", "core.parquet")
 EXTEND = os.path.join(LLV_PATH, "data", "ohlcv", "extend.parquet")

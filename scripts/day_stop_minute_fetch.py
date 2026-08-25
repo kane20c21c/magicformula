@@ -25,7 +25,10 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-LLV = Path(os.getenv("LLV_PATH", str(Path.home() / "DriveForALL/StoLab/longlivevault")))
+# LLV 는 StoLab/ 아래 형제 저장소 — 머신(미니/에어) 무관 상대 경로.
+# 빈 값은 미설정 취급(`or`), "~/..." 표기는 expanduser 로 편다.
+STOLAB_ROOT = Path(__file__).resolve().parents[2]   # StoLab/
+LLV = Path(os.getenv("LLV_PATH") or str(STOLAB_ROOT / "LongLiveVault")).expanduser()
 sys.path.insert(0, str(LLV))
 
 from stolab_data.kis_fetcher import fetch_minute_bars_on_date  # noqa: E402

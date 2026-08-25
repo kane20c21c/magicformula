@@ -1,5 +1,8 @@
 # Magic Formula — M4 분석 워크벤치 핸드오프
 
+> **`$STOLAB`** = 이 기계의 StoLab 루트 (기계마다 다르다 — 맥미니 운영본과 맥에어
+> 개발본의 위치가 같지 않다). 아래 셸 명령은 `export STOLAB=<StoLab 루트>` 를 전제한다.
+
 > 작성: 2026-05-28 · Kane & 클로이  
 > 다음 작업자 (= Mac.Air에서 작업할 다음 클로이) 가 컨텍스트를 잃지 않도록 정리한 문서.
 
@@ -152,7 +155,7 @@ StoLab/
 └── LongLiveVault/
 ```
 
-- 맥미니(운영) `~/DriveForALL/StoLab/…` · 맥에어(개발) `~/Dev/StoLab/…` 둘 다 동작.
+- 맥미니(운영)·맥에어(개발) 어느 쪽이든, StoLab 루트 위치와 무관하게 동작한다.
 - 해당 위치: `magic_formula/_vault.py`, `scripts/{run_analysis,daily_signal,daily_extended_signal}.py`
 - ⚠ launchd plist 는 여전히 리터럴 절대경로다 (맥미니 전용). 시나리오 A 에서는
   Mac.Air 에 등록하지 않으므로 무시.
@@ -177,8 +180,8 @@ python3 -c "import platform; print(platform.machine())"   # arm64 떠야 함
 ### 3-2. 저장소 클론
 
 ```bash
-mkdir -p ~/DriveForALL/StoLab
-cd ~/DriveForALL/StoLab
+mkdir -p $STOLAB
+cd $STOLAB
 
 git clone https://github.com/kane20c21c/magicformula.git "Magic Formula"
 git clone https://github.com/kane20c21c/longlivevault.git
@@ -190,7 +193,7 @@ Mac.Mini에서 미리 묶기:
 
 ```bash
 # Mac.Mini (Intel)
-cd ~/DriveForALL/StoLab/longlivevault
+cd $STOLAB/longlivevault
 mkdir -p ~/Desktop/llv_for_m4/ohlcv/tickers
 cp data/ohlcv/core.parquet           ~/Desktop/llv_for_m4/ohlcv/
 cp data/ohlcv/tickers/KOSPI.parquet  ~/Desktop/llv_for_m4/ohlcv/tickers/
@@ -202,7 +205,7 @@ AirDrop / 외장하드 / iCloud 로 Mac.Air에 옮기고:
 
 ```bash
 # Mac.Air (M4)
-cd ~/DriveForALL/StoLab/longlivevault
+cd $STOLAB/longlivevault
 mkdir -p data/ohlcv/tickers
 cp ~/Downloads/llv_for_m4/ohlcv/core.parquet           data/ohlcv/
 cp ~/Downloads/llv_for_m4/ohlcv/tickers/KOSPI.parquet  data/ohlcv/tickers/
@@ -215,7 +218,7 @@ cp -r ~/Downloads/llv_for_m4/analysis_snapshot "../Magic Formula/output/analysis
 ### 3-4. 가상환경 + 의존성
 
 ```bash
-cd ~/DriveForALL/StoLab/longlivevault
+cd $STOLAB/longlivevault
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
@@ -241,7 +244,7 @@ python3 -c "from stolab_data.ohlcv_store import get_ohlcv; \
             print(get_ohlcv('KOSPI', '20240101', '20240131').tail())"
 
 # (3) Magic Formula 분석 트랙 quick-test (5~10분)
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 python scripts/run_analysis.py --quick-test
 ls -la output/analysis/
 # → 오늘 날짜 폴더 생성되면 정상
@@ -264,7 +267,7 @@ Mac.Mini에서 51조합 × 3규칙 = 153회 백테스트가 너무 느렸음. M4
 #### (1) 베이스라인 측정
 
 ```bash
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 time python scripts/run_analysis.py
 ```
 
@@ -389,9 +392,9 @@ python scripts/daily_signal.py
 
 ```bash
 # Mac.Mini (최신 vault batch 이후, 예: 평일 20:31 ~ 다음 날 새벽 사이)
-cd ~/DriveForALL/StoLab/longlivevault
-rsync -av data/ohlcv/core.parquet           m4-host:~/DriveForALL/StoLab/longlivevault/data/ohlcv/
-rsync -av data/ohlcv/tickers/KOSPI.parquet  m4-host:~/DriveForALL/StoLab/longlivevault/data/ohlcv/tickers/
+cd $STOLAB/longlivevault
+rsync -av data/ohlcv/core.parquet           m4-host:$STOLAB/longlivevault/data/ohlcv/
+rsync -av data/ohlcv/tickers/KOSPI.parquet  m4-host:$STOLAB/longlivevault/data/ohlcv/tickers/
 # (rsync 가 어려우면 AirDrop / 클라우드 드라이브로 대체)
 ```
 
@@ -400,7 +403,7 @@ rsync -av data/ohlcv/tickers/KOSPI.parquet  m4-host:~/DriveForALL/StoLab/longliv
 ### 5-2. 분석 실행 (Mac.Air)
 
 ```bash
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 git pull                                           # yaml/코드 최신화
 source .venv/bin/activate
 python scripts/run_analysis.py                     # 풀 백테스트 (STEP B 가속화 적용된 상태)
@@ -437,14 +440,14 @@ python scripts/update_strategy.py \
 
 ```bash
 # Mac.Air
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 git add configs/active_strategy.yaml configs/history/
 git add -f output/analysis/YYYY-MM-DD/   # .gitignore 되어 있어 -f 필요
 git commit -m "analysis(YYYY-MM): <strategy_id> 적용 — alpha +XX.X%"
 git push
 
 # Mac.Mini
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 git pull
 # → 다음 평일 20:40 launchd 가 새 yaml 로 데일리 시그널 생성
 ```

@@ -1,5 +1,8 @@
 # Mac.Mini 데일리 트랙 포팅 계획 — 5영역 결합 시스템 (v2)
 
+> **`$STOLAB`** = 이 기계의 StoLab 루트 (기계마다 다르다 — 맥미니 운영본과 맥에어
+> 개발본의 위치가 같지 않다). 아래 셸 명령은 `export STOLAB=<StoLab 루트>` 를 전제한다.
+
 작성: 2026-05-30 · Kane & 클로이 (M4 분석)
 대상: Mac.Mini (Intel i5, 데일리 운영 트랙)
 목적: M4에서 확정한 신 계산방법(v2_combined)을 데일리 시그널 생성에 반영
@@ -30,7 +33,7 @@
 
 | 의존성 | 용도 | Mac.Mini 상태 확인 |
 |---|---|---|
-| **hillstorm** (`kane20c21c/hillstorm`) | Wyckoff 국면 분류 + 전환신호 | `~/DriveForALL/StoLab/hillstorm` 존재? |
+| **hillstorm** (`kane20c21c/hillstorm`) | Wyckoff 국면 분류 + 전환신호 | `$STOLAB/hillstorm` 존재? |
 | **plotly** | hillstorm wyckoff_analysis import 체인 | `pip show plotly` |
 | **scipy** | (분석용, 데일리엔 불필요할 수도) | 확인 |
 | full-column parquet | 거래량/BB/심리 21지표 | vault core.parquet 가 이미 포함 (collector 만 자름) |
@@ -98,7 +101,7 @@ else:
 ### STEP 1 — Mac.Mini 의존성 설치
 ```bash
 # Mac.Mini
-cd ~/DriveForALL/StoLab
+cd $STOLAB
 # hillstorm 없으면
 gh repo clone kane20c21c/hillstorm   # 또는 git clone
 cd "Magic Formula" && source .venv/bin/activate   # (데일리용 venv)
@@ -109,7 +112,7 @@ python -c "import sys; sys.path.insert(0,'../hillstorm'); from wyckoff_analysis 
 
 ### STEP 2 — 코드 동기화
 ```bash
-cd ~/DriveForALL/StoLab/"Magic Formula"
+cd $STOLAB/"Magic Formula"
 git pull   # area_scores.py + variants + runner 변경 받기
 ```
 > ⚠️ Mac.Mini 는 **구 레포(kane20c21c/magicformula)** 를 쓰고 있을 수 있음.

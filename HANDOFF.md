@@ -1,7 +1,10 @@
 # HANDOFF — 황금률만들기 (MagicFormula)
 
+> **`$STOLAB`** = 이 기계의 StoLab 루트 (기계마다 다르다 — 맥미니 운영본과 맥에어
+> 개발본의 위치가 같지 않다). 아래 셸 명령은 `export STOLAB=<StoLab 루트>` 를 전제한다.
+
 > 작성 2026-08-25 (KST) · 작성자 클로이
-> 리포 위치 `~/DriveForALL/StoLab/MagicFormula`
+> 리포 위치 `$STOLAB/MagicFormula`
 
 **근거 태그** — 모든 항목에 출처를 붙였다.
 
@@ -36,7 +39,7 @@ launchd 잡으로 자동 산출되고, 결과는 메일·푸시·웹 화면으�
 | # | 룰 | 버전 · 확정일 | 스펙 정본 | 성격 |
 |---|---|---|---|---|
 | 1 | **황금률** | `COMBINED-v2-2026-05` (2026-05-31 승격) | `configs/active_strategy.yaml` | 진입 신호 (종목 점수) |
-| 2 | **데이 포트** | **v1.1.2.2** (2026-08-24~) | `~/DriveForALL/StoLab/StockPortfolio/app/paper_day/config.py` | 1일 스윙 (ML) |
+| 2 | **데이 포트** | **v1.1.2.2** (2026-08-24~) | `$STOLAB/StockPortfolio/app/paper_day/config.py` | 1일 스윙 (ML) |
 | 3 | **스윙 포트** | **v1.2.2.3** (2026-08-17) | `korean_mkt_study/STRATEGY.md` + `strategy_spec.json` | 눌림목 진입 |
 | 4 | **발열률** | 2026-08-14 구축 | `fever_model/CLAUDE.md` | 시장온도 + 관측 명단 |
 
@@ -104,7 +107,7 @@ plist 정본은 `configs/launchd/`, 운영본은 `~/Library/LaunchAgents/` 심�
 `[실측]` 2026-08-25 확인: 7개 전부 launchctl 등재 + 최근 종료코드 0, 발열률 2개만
 복사본(`-rw-`)이고 나머지 5개는 심링크가 맞다.
 
-✅ `[실측]` 종전 "`~/DriveForALL/StoLab/StockPortfolio/SCHEDULED_TASKS.md` 에
+✅ `[실측]` 종전 "`$STOLAB/StockPortfolio/SCHEDULED_TASKS.md` 에
 `kms-shadow-track` 누락" 은 **해소**. 같은 점검에서 `longlivevault-{foreign-0811,
 volscale-2050, derivatives-merge}` 3건도 빠져 있어 함께 채웠고, 등재 레이블을
 `launchctl list` 와 대조해 **38개**로 맞췄다 — **레이블** 누락 0.
@@ -226,7 +229,7 @@ v1.1.1.2, 데이는 R1/R2/R3 세 규칙. **다음 달 모델 평가 때 같은 �
 ## 4. 폴더 구조
 
 ```
-~/DriveForALL/StoLab/MagicFormula/
+$STOLAB/MagicFormula/
 ├── CLAUDE.md                    ★ 룰 레지스트리 — 작업 시작 전 먼저 읽는 파일
 ├── HANDOFF.md                   이 문서
 ├── README.md                    외부 문서 (API·디렉토리 상세)
@@ -306,7 +309,7 @@ v1.1.1.2, 데이는 R1/R2/R3 세 규칙. **다음 달 모델 평가 때 같은 �
 3. 소액 실운영으로 체결 괴리 측정
 4. **"손절 불필요" 결론은 약세장 검증 전 확정 금지.** 계좌 전체 방어선은 별도 권고
 
-근거 리포트: `~/DriveForALL/StoLab/StockPortfolio/reports/황금률_전구간_재검증_20260824.html`
+근거 리포트: `$STOLAB/StockPortfolio/reports/황금률_전구간_재검증_20260824.html`
 
 ### 5.2 B — 기한이 있는 관찰 `[문서]` `[세션]`
 
@@ -408,11 +411,11 @@ Wyckoff는 황금률의 5번째 점수 요소가 아니라 **게이트**다. `[�
 
 | 상대 | 위치 | 관계 |
 |---|---|---|
-| **longlivevault (LLV)** | `~/DriveForALL/StoLab/longlivevault` | **거의 읽기 전용.** OHLCV·지표 45컬럼·Wyckoff·수급·`ticker_classification.json`·`data/vol_scale.json` 공급. 진입점은 `magic_formula/_vault.py`. ⚠ **역방향 의존 1건** — 아래 참조 |
-| **StockPortfolio (SP)** | `~/DriveForALL/StoLab/StockPortfolio` | 신호 소비자 + **청산 규칙 실행 정본**. 8000 포트 |
-| **hillstorm** | `~/DriveForALL/StoLab/hillstorm` | Wyckoff 분류 엔진 (LLV가 위임 호출) |
+| **longlivevault (LLV)** | `$STOLAB/longlivevault` | **거의 읽기 전용.** OHLCV·지표 45컬럼·Wyckoff·수급·`ticker_classification.json`·`data/vol_scale.json` 공급. 진입점은 `magic_formula/_vault.py`. ⚠ **역방향 의존 1건** — 아래 참조 |
+| **StockPortfolio (SP)** | `$STOLAB/StockPortfolio` | 신호 소비자 + **청산 규칙 실행 정본**. 8000 포트 |
+| **hillstorm** | `$STOLAB/hillstorm` | Wyckoff 분류 엔진 (LLV가 위임 호출) |
 | **homalone (아웃퍼포머)** | 8501 포트 | 화면 — Quickview(황금률) · Temp.View(발열률) |
-| **MorningBrief** | `~/DriveForALL/StoLab/MorningBrief` | 메일·Pushover 발송 위임 |
+| **MorningBrief** | `$STOLAB/MorningBrief` | 메일·Pushover 발송 위임 |
 
 ⚠ **형제 폴더 배치가 곧 설정이다.** SP의 `app/core/config.py`가 `StoLab/` 아래
 형제 폴더 기준으로 경로를 계산하므로, 폴더 이름·위치를 바꾸면 서버가 안 뜬다. `[문서]`

@@ -1,5 +1,8 @@
 # Magic Formula — launchd 자동화
 
+> **`$STOLAB`** = 이 기계의 StoLab 루트 (기계마다 다르다 — 맥미니 운영본과 맥에어
+> 개발본의 위치가 같지 않다). 아래 셸 명령은 `export STOLAB=<StoLab 루트>` 를 전제한다.
+
 vault 와 동일한 launchd 방식으로 Magic Formula 데일리 시그널을 자동 실행한다.
 
 ## 파일
@@ -20,7 +23,7 @@ vault 와 동일한 launchd 방식으로 Magic Formula 데일리 시그널을 �
 ### 발열률 잡 등록 (최초 1회)
 
 ```bash
-cd ~/DriveForALL/StoLab/MagicFormula
+cd $STOLAB/MagicFormula
 # 0) 사전 확인 — 배치가 쓰는 파이썬에 의존성이 있는지
 /usr/local/bin/python3 -c "import pandas, numpy, sklearn, pyarrow, matplotlib; print('ok')"
 #    matplotlib 이 없으면 그래프만 건너뛰고 일지·표는 정상 산출된다 (fail-safe).
@@ -51,24 +54,24 @@ launchctl print gui/$(id -u)/com.kane.fever-rule-daily | head -20   # state/prog
 
 수동 테스트: `launchctl kickstart -k gui/$(id -u)/com.kane.fever-rule-daily`
 로그: `fever_model/fever-daily.log` · `fever-mail.log`
-상태 JSON: `~/DriveForALL/StoLab/_status/fever-rule-daily.json` (run_batch.sh 계측)
+상태 JSON: `$STOLAB/_status/fever-rule-daily.json` (run_batch.sh 계측)
 
 ### 확장 잡 등록 (최초 1회)
 
 ```bash
-ln -sf "~/DriveForALL/StoLab/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-extended-signal.plist" \
+ln -sf "$STOLAB/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-extended-signal.plist" \
        ~/Library/LaunchAgents/com.stolab.magic-formula.daily-extended-signal.plist
 launchctl load ~/Library/LaunchAgents/com.stolab.magic-formula.daily-extended-signal.plist
 launchctl list | grep magic-formula        # daily-signal + daily-extended-signal 둘 다 보여야 정상
 ```
 수동 테스트: `launchctl start com.stolab.magic-formula.daily-extended-signal`
-또는 `python "~/DriveForALL/StoLab/MagicFormula/scripts/daily_extended_signal.py"`. 로그: `output/logs/daily_extended_signal.{out,err}`.
+또는 `python "$STOLAB/MagicFormula/scripts/daily_extended_signal.py"`. 로그: `output/logs/daily_extended_signal.{out,err}`.
 
 ## 등록 (최초 1회)
 
 ```bash
 # 1) ~/Library/LaunchAgents/ 로 심볼릭 링크
-ln -sf "~/DriveForALL/StoLab/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-signal.plist" \
+ln -sf "$STOLAB/MagicFormula/configs/launchd/com.stolab.magic-formula.daily-signal.plist" \
        ~/Library/LaunchAgents/com.stolab.magic-formula.daily-signal.plist
 
 # 2) launchd 에 로드
@@ -98,7 +101,7 @@ launchctl start com.stolab.magic-formula.daily-signal
 또는 그냥 스크립트 직접:
 
 ```bash
-python "~/DriveForALL/StoLab/MagicFormula/scripts/daily_signal.py"
+python "$STOLAB/MagicFormula/scripts/daily_signal.py"
 ```
 
 ## 로그 확인

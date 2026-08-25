@@ -38,7 +38,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LLV = Path(os.getenv("LLV_PATH", str(Path.home() / "DriveForALL/StoLab/longlivevault")))
+# LLV 는 StoLab/ 아래 형제 저장소 — 머신(미니/에어) 무관 상대 경로.
+# 빈 값은 미설정 취급(`or`), "~/..." 표기는 expanduser 로 편다.
+STOLAB_ROOT = Path(__file__).resolve().parents[2]   # StoLab/
+LLV = Path(os.getenv("LLV_PATH") or str(STOLAB_ROOT / "LongLiveVault")).expanduser()
 STUDY = Path(__file__).resolve().parents[1] / "output" / "day_stop_study"
 
 # ── 엔진 상수 (StockPortfolio/app/paper_day/config.py 와 동기) ──

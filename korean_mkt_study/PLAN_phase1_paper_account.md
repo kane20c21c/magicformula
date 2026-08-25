@@ -1,5 +1,8 @@
 # 구현 계획서 — Phase 1: 가상 계좌 (페이퍼 트레이딩) — v2
 
+> **`$STOLAB`** = 이 기계의 StoLab 루트 (기계마다 다르다 — 맥미니 운영본과 맥에어
+> 개발본의 위치가 같지 않다). 아래 셸 명령은 `export STOLAB=<StoLab 루트>` 를 전제한다.
+
 - **작성**: 2026-07-06 (클로이) / **v2 수정**: Kane 피드백 반영 (실전 체결 모델·비용·페이지명) / **컨펌 대기**
 - **전략 정본**: `kr_pullback_largecap_foreign` v1.0.0 (STRATEGY.md / strategy_spec.json / strategy_reference.py)
 - **전체 로드맵**: ①가상 계좌 페이지(이 문서) → ②20:30 진입신호 생성+이메일 통지 → ③토스 실계좌 청산 트리거 이메일+푸시
@@ -129,7 +132,7 @@ Kane 확정: 신호 메일 **2회**(20:45 생성 직후 + 다음 거래일 **08:
 ## 7. launchd 등록 (Kane 실행)
 
 ```bash
-cd ~/DriveForALL/StoLab/StockPortfolio/configs/launchd
+cd $STOLAB/StockPortfolio/configs/launchd
 for f in com.kane.stockportfolio-paper-*.plist; do
   ln -sf "$PWD/$f" ~/Library/LaunchAgents/"$f"
   launchctl load ~/Library/LaunchAgents/"$f"

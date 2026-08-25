@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 RED = "#ef5350"
 BLUE = "#1976D2"
 
-_STOLAB = Path(os.path.expanduser("~/DriveForALL/StoLab"))
+# StoLab 루트 — 머신(미니/에어) 무관하게 이 파일 위치에서 계산.
+# mop_model/src/ → mop_model/ → MagicFormula/ → StoLab/
+_STOLAB = Path(__file__).resolve().parents[3]
 _ENV_CANDIDATES = [
     _STOLAB / "StockPortfolio" / ".env",     # GMAIL_* / ALERT_EMAIL
     _STOLAB / "MorningBrief" / ".env",       # PUSHOVER_* 폴백 (실존 폴더명 — 공백 없음)

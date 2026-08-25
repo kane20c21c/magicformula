@@ -369,7 +369,7 @@ tr.best{{background:#fff8e1}} tr.base td{{background:#eef1f4;font-weight:600}}
 
     A("<h2>7. 재현</h2>")
     A('<pre style="background:#f5f5f5;padding:12px;border-radius:4px;font-size:12.5px">'
-      'cd ~/DriveForALL/StoLab/MagicFormula/korean_mkt_study\n'
+      'cd &lt;MagicFormula 저장소&gt;/korean_mkt_study\n'
       'python3 pattern_study.py          # 신호 수준 격자 → out/pattern_grid.csv\n'
       'python3 make_pattern_report.py    # 이 리포트 (포트폴리오·출렁다리·물타기 분해 포함)</pre>')
     A("</body></html>")
