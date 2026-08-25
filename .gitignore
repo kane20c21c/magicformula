@@ -31,3 +31,20 @@ docs/holdtiming/archive_llv_*/
 
 # ── 로그 (INFRA_DR rotate_logs.sh 가 03:00 에 <name>.YYYYMMDD.log 로 회전) ──
 *.log
+
+# ── 스윙 포트 백테스트 원자료 (2026-08-25 Kane 결정) ──
+# korean_mkt_study/data/ 는 710MB 이고 investor_flow.parquet 하나가 132MB —
+# GitHub 파일당 100MB 하드 한계를 넘어 커밋하면 푸시가 거부된다.
+# 원자료 보존은 R2 오프사이트 백업이 담당한다 (INFRA_DR 2026-07-31 방침).
+# ⚠ 삭제 금물 — backtest.py 의 유일한 입력이다. git 밖에 둘 뿐이다.
+#
+# ⚠ `data/` 가 아니라 `data/*` 인 이유 — git 은 **디렉토리를 무시하면 그 안을
+#   아예 탐색하지 않아** 하위 파일을 `!` 로 되살릴 수 없다. 아래 예외 2건을
+#   살리려면 반드시 `/*` 형태여야 한다 (2026-08-25 실측으로 확인).
+korean_mkt_study/data/*
+korean_mkt_study/out/
+
+# 예외: 그림자 추적 상태는 작고(~10KB) 다음 달 모델 평가의 근거라 추적한다.
+# 유실되면 v1.1.1.2 대비 비교를 재현할 수 없다 (평일 20:35 kms-shadow-track 산출).
+!korean_mkt_study/data/shadow_v1112_state.json
+!korean_mkt_study/data/shadow_v1112_equity.csv
