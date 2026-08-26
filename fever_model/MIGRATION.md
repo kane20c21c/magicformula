@@ -73,12 +73,46 @@ git push
 # ── 미니에서
 export STOLAB=~/DriveForALL/StoLab
 cd $STOLAB/MagicFormula
-git status                                  # 깨끗해야 한다 (로컬 수정이 있으면 먼저 정리)
+git status                                  # ⚠ 아래 "미니는 항상 dirty 하다" 를 먼저 읽을 것
 git pull
 git log --oneline -1                        # af69691 … "발열률 → 현물게이지(SpotGauge) 분리 준비" 확인
 ```
 
 ⚠ 위 해시가 안 보이면 **1단계로 넘어가지 말 것.**
+
+#### ⚠⚠ 미니는 항상 dirty 하다 — `git checkout .` · `git stash` 금지
+
+미니의 `git status` 에는 **평상시에도** 아래 두 파일이 modified 로 뜬다.
+
+```
+modified:   korean_mkt_study/data/shadow_v1112_equity.csv
+modified:   korean_mkt_study/data/shadow_v1112_state.json
+```
+
+**고장이 아니다.** 2026-08-25 `1803fdd` 에서 이 둘을 `.gitignore` 예외 ① 로
+**추적하기로 정했는데**, 평일 20:35 `com.kane.kms-shadow-track` 배치가 매일
+같은 파일에 append 한다. 추적 대상을 배치가 매일 고치니 영구히 dirty 한 것이다.
+
+**"정리"한다고 `git checkout .` 이나 `git stash` 를 돌리면 그림자 추적 데이터가
+날아간다.** 이 둘은 다음 달 스윙 포트 모델 평가의 **유일한 근거**다
+(HANDOFF §2.2 · `.gitignore` 예외 ① 주석 — "유실되면 v1.1.1.2 대비 비교를
+재현할 수 없다"). 되돌리면 그날치가 조용히 사라진다.
+
+**pull 은 이 상태로 그냥 된다.** `[실측]` 2026-08-26 확인 — 준비 커밋 2개
+(`af69691`·`03ad1e7`)가 건드린 12개 파일 중 `korean_mkt_study/` 는 **0건**이라
+경로가 겹치지 않는다. 워킹트리 수정은 병합에 얹힌 채 보존된다.
+
+선택지 (케인 판단):
+
+```bash
+# (a) 권장 — 지금 상태를 커밋해 두고 넘어간다. 08-25 이후분이 원격에 보존된다.
+git add korean_mkt_study/data/shadow_v1112_{equity.csv,state.json}
+git commit -m "chore(shadow): 스윙 그림자 추적 상태 갱신"
+
+# (b) 그냥 둔다 — pull·split 모두 정상 동작한다. 다만 dirty 가 계속 남는다.
+```
+
+⚠ **어느 쪽이든 `git checkout` 으로 되돌리지는 말 것.**
 
 ### 0-C. 시간대
 
@@ -170,8 +204,15 @@ tail -1 $STOLAB/SpotGauge/output/나우캐스트_온도일지.csv   # 날짜가 
 ```
 
 이 시점부터 `.gitignore` 의 `!output/*일지.csv` 예외가 발효한다 (리포 루트가 됐으므로).
-일지 3종을 실제로 추적할지는 케인 판단 — 추적하면 기계 이동에 안전하지만
-매일 diff 가 뜬다. 추적하려면:
+일지 3종을 실제로 추적할지는 케인 판단이다.
+
+⚠ **결정 전에 0-B 의 "미니는 항상 dirty 하다" 를 읽을 것.** 스윙 그림자 파일 2개가
+정확히 이 선택의 결과다 — 추적하기로 정했더니(`1803fdd`) 매일 배치가 고쳐서
+미니 `git status` 가 영구히 dirty 해졌다. 일지 3종을 추적하면 **같은 일이 3개 더
+생긴다.** 반대로 추적하지 않으면 기계 이동 때 3-A 같은 수동 확인을 매번 해야 한다.
+정답이 있는 문제가 아니라 어느 쪽 번거로움을 택하느냐의 문제다.
+
+추적하려면:
 
 ```bash
 cd $STOLAB/SpotGauge
