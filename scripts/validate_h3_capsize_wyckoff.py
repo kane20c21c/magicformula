@@ -24,17 +24,24 @@ forward return = raw (방향 일치가 핵심이라 raw 사용). horizon 5·10.
 룩어헤드 없음(Wyckoff_Phase·MarketCap 모두 t시점 정보).
 """
 from __future__ import annotations
-import json, glob, warnings
+import json, glob, os, warnings
 from pathlib import Path
 import numpy as np, pandas as pd, scipy.stats as st
 warnings.filterwarnings("ignore")
 
 from magic_formula.analysis import ic_framework as IC
 
-VAULT = Path("/sessions/practical-friendly-mccarthy/mnt/longlivevault/data")
+# 절대 규칙 1 — 홈 경로 하드코딩 금지. 저장소 루트에서 형제 경로로 해석한다.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]      # .../StoLab/MagicFormula
+STOLAB_ROOT = PROJECT_ROOT.parent                       # .../StoLab
+LLV_PATH = Path(
+    os.environ.get("LLV_PATH") or STOLAB_ROOT / "LongLiveVault"
+).expanduser()
+
+VAULT = LLV_PATH / "data"
 OHLCV = VAULT / "ohlcv"
 RAW = VAULT / "raw"
-OUT = Path("/sessions/practical-friendly-mccarthy/mnt/outputs/validation")
+OUT = PROJECT_ROOT / "output" / "validation"
 OUT.mkdir(parents=True, exist_ok=True)
 
 ASOF = "20260611"

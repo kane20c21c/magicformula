@@ -16,7 +16,7 @@ validate_split_300_vs_rest.py
        그 다음 IC/국면 통계만 각 그룹으로 한정해 비교.
 """
 from __future__ import annotations
-import json, warnings
+import json, os, warnings
 from pathlib import Path
 import numpy as np, pandas as pd
 import scipy.stats as st
@@ -25,12 +25,23 @@ warnings.filterwarnings("ignore")
 from magic_formula.analysis import area_scores as A
 from magic_formula.analysis import ic_framework as IC
 
-BASE = Path("/sessions/funny-stoic-cray/mnt")
-VAULT = BASE / "longlivevault" / "data" / "ohlcv"
+# 절대 규칙 1 — 홈 경로 하드코딩 금지. 저장소 루트에서 형제 경로로 해석한다.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]      # .../StoLab/MagicFormula
+STOLAB_ROOT = PROJECT_ROOT.parent                       # .../StoLab
+LLV_PATH = Path(
+    os.environ.get("LLV_PATH") or STOLAB_ROOT / "LongLiveVault"
+).expanduser()
+
+VAULT = LLV_PATH / "data" / "ohlcv"
 CORE = VAULT / "core.parquet"; EXTEND = VAULT / "extend.parquet"
 KOSPI200 = VAULT / "tickers" / "KOSPI200.parquet"
-XLSX = BASE / "uploads" / "유니버스200_섹터분류용_20260611.xlsx"
-OUT = BASE / "outputs" / "split300"; OUT.mkdir(parents=True, exist_ok=True)
+# ⚠ 이 xlsx 는 저장소에 없다 (옛 Cowork 세션 업로드본). 실행 전 파일을 output/ 에 두거나
+#    UNIVERSE_XLSX 환경변수로 경로를 지정할 것.
+XLSX = Path(
+    os.environ.get("UNIVERSE_XLSX")
+    or PROJECT_ROOT / "output" / "유니버스200_섹터분류용_20260611.xlsx"
+).expanduser()
+OUT = PROJECT_ROOT / "output" / "split300"; OUT.mkdir(parents=True, exist_ok=True)
 
 WEIGHTS = A.COMBINED_WEIGHTS
 HORIZONS = [5, 10]; MODES = ["raw", "alpha"]

@@ -31,6 +31,7 @@ validate_score_wyckoff_200.py
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from pathlib import Path
 
@@ -46,11 +47,18 @@ from magic_formula.analysis import ic_framework as IC
 # ---------------------------------------------------------------------------
 # 경로
 # ---------------------------------------------------------------------------
-VAULT = Path("/sessions/practical-friendly-mccarthy/mnt/longlivevault/data/ohlcv")
+# 절대 규칙 1 — 홈 경로 하드코딩 금지. 저장소 루트에서 형제 경로로 해석한다.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]      # .../StoLab/MagicFormula
+STOLAB_ROOT = PROJECT_ROOT.parent                       # .../StoLab
+LLV_PATH = Path(
+    os.environ.get("LLV_PATH") or STOLAB_ROOT / "LongLiveVault"
+).expanduser()
+
+VAULT = LLV_PATH / "data" / "ohlcv"
 CORE = VAULT / "core.parquet"
 EXTEND = VAULT / "extend.parquet"
 KOSPI200 = VAULT / "tickers" / "KOSPI200.parquet"
-OUT = Path("/sessions/practical-friendly-mccarthy/mnt/outputs/validation")
+OUT = PROJECT_ROOT / "output" / "validation"
 OUT.mkdir(parents=True, exist_ok=True)
 
 WEIGHTS = A.COMBINED_WEIGHTS          # 운영본: T0.2/M0.2/Vu0/Va0.6
