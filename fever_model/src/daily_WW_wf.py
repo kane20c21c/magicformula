@@ -37,16 +37,20 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import RobustScaler
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # launchd 대비 (같은 폴더)
+from _stolab import find_stolab                                  # noqa: E402
+
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
 # 경로
 # ---------------------------------------------------------------------------
-BASE = os.path.dirname(os.path.abspath(__file__))          # fever_model/src
-FM   = os.path.dirname(BASE)                               # fever_model
+BASE = os.path.dirname(os.path.abspath(__file__))          # src/
+FM   = os.path.dirname(BASE)                               # 리포 루트
 DATA = os.path.join(FM, "data")
 OUT  = os.path.join(FM, "output")
-STOLAB = os.path.dirname(os.path.dirname(FM))              # StoLab/ (저장소의 상위)
+# ⚠ 깊이 고정식(dirname×2) 금지 — SpotGauge 이관 시 한 단계 어긋난다. `_stolab.py` 참조.
+STOLAB = find_stolab(FM)                                   # StoLab/ (형제 프로젝트로 판정)
 LLV  = os.environ.get("LLV_DIR", os.path.join(STOLAB, "longlivevault"))
 OHLCV = os.path.join(LLV, "data", "ohlcv")
 

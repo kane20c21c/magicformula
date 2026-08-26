@@ -20,6 +20,13 @@ vault 와 동일한 launchd 방식으로 Magic Formula 데일리 시그널을 �
 - `com.kane.fever-rule-mail.plist` — 평일 **17:00** 발열률 명단 메일
   (`fever_model/src/send_fever_mail.py`). 계산 없이 산출물만 읽어 발송.
 
+> **⚠ 발열률 2개는 현물게이지(SpotGauge) 로 이관 예정** (Kane 결정 2026-08-26).
+> 이관하면 이 두 잡은 **이 파일 소관이 아니게 된다** — 정본이
+> `SpotGauge/configs/launchd/` 로 옮겨가고, 여기 있는 두 plist 는 삭제한다.
+> SpotGauge 경로로 고친 사본은 이미 `fever_model/configs/launchd/` 에 있다(미등록).
+> **경로가 바뀌므로 폴더 이동 후 반드시 재등록해야 한다** — 절차는
+> `fever_model/MIGRATION.md` 4단계. 이관 완료 전까지는 아래 블록이 유효하다.
+
 ### 발열률 잡 등록 (최초 1회)
 
 ```bash

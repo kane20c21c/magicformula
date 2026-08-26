@@ -17,16 +17,21 @@ from __future__ import annotations
 import argparse
 import os
 import smtplib
+import sys
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # launchd 대비 (같은 폴더)
+from _stolab import find_stolab                                  # noqa: E402
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 FM   = os.path.dirname(BASE)
 OUT  = os.path.join(FM, "output")
-STOLAB = os.path.dirname(os.path.dirname(FM))
+# ⚠ 깊이 고정식(dirname×2) 금지 — SpotGauge 이관 시 한 단계 어긋난다. `_stolab.py` 참조.
+STOLAB = find_stolab(FM)
 
 TEMP_LOG = os.path.join(OUT, "나우캐스트_온도일지.csv")
 TOP_CSV  = os.path.join(OUT, "발열률_상위10.csv")

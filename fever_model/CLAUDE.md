@@ -1,4 +1,4 @@
-# 발열률 (fever_model) — 시장온도 나우캐스트 + Vblk 탄력점수
+# 발열률 — 시장온도 나우캐스트 + Vblk 탄력점수 (현물게이지 SpotGauge)
 
 > **⚠ 작업 경계 — StoLab 절대 규칙 7 (2026-08-26)**
 > 어시스턴트는 **수정 → 스모크 테스트 → `git commit`** 까지만 한다. 테스트 없이 커밋하지 않는다.
@@ -7,7 +7,11 @@
 > 상세는 `StoLab/CLAUDE.md` 의 "작업 경계" 절. **이 파일에 사본을 만들지 말 것** (드리프트 방지).
 
 **명명**: 2026-08-14 Kane. "열을 재고(온도), 열을 내는 종목을 찾는다(탄력)" 2단 구조.
-룰 4개 중 4번째 — 전체 지도는 상위 `MagicFormula/CLAUDE.md`.
+
+**소속**: 2026-08-26 Kane 결정으로 MagicFormula 에서 독립 — 프로젝트명 **현물게이지
+(SpotGauge)**. 분리 근거·구조는 `README.md`, 이관 절차는 `MIGRATION.md`.
+MagicFormula 에 남는 것은 **매매 룰 3개**(황금률 · 데이 포트 · 스윙 포트)다.
+⚠ 이관 완료 전까지 실제 경로는 `MagicFormula/fever_model/` 이다.
 
 **성격**: 예측이 아니라 **관측(나우캐스트)**. "누가 오를까"가 아니라
 "지금 누가 움직이고 있고, 그 움직임이 어떤 구조인가". 관측 지평 **20~60거래일**
@@ -106,14 +110,18 @@ python3 src/send_fever_mail.py --dry-run    # 메일 미리보기
 ## 파일
 
 ```
-fever_model/
-├── CLAUDE.md                                    # 이 파일
+SpotGauge/                                       # 이관 전: MagicFormula/fever_model/
+├── CLAUDE.md                                    # 이 파일 (룰 정본)
+├── README.md                                    # 프로젝트 개요 · 분리 근거
+├── MIGRATION.md                                 # 이관 체크리스트 (이관 후 삭제)
+├── configs/launchd/                             # plist 정본 2개
 ├── docs/
 │   ├── 파동국면_스터디노트_20260811.md            # ★ 전체 맥락 (§5-6 온도, §5-7 Vblk)
 │   └── 일일워크포워드_작업지시_20260814.md         # 구현 지시서 (원안)
 ├── src/
 │   ├── daily_WW_wf.py                           # ★ 일일 워크포워드 (운영 정본)
 │   ├── send_fever_mail.py                       # ★ 메일 발송 (계산 없음)
+│   ├── _stolab.py                               # StoLab 루트 탐색 (이관 안전장치)
 │   ├── nowcast_grid.py                          # 격자 실험 원본 (온도 로직 출처)
 │   ├── resilience_v2.py                         # 백테스트 원본 (Vblk 로직 출처)
 │   └── resilience_score.py                      # V1 — 과열 플래그 로직 출처
@@ -128,10 +136,18 @@ fever_model/
     └── 탄력점수_V2_채점_20260813.xlsx             # 8/7 빈티지 명단 (재채점용)
 ```
 
-plist 정본: `MagicFormula/configs/launchd/com.kane.fever-rule-{daily,mail}.plist`
+plist 정본: `configs/launchd/com.kane.fever-rule-{daily,mail}.plist` (이 리포 안).
 ⚠ 2026-08-14 등록 완료. **심링크가 아니라 복사본**으로 `~/Library/LaunchAgents/` 에
-올라가 있으므로 **plist 수정 시 재복사 필요** (등록 절차·트러블슈팅은
-`configs/launchd/README.md`).
+올라가 있으므로 **plist 수정 시 재복사 필요**.
+⚠ **이관 전까지 현재 가동 중인 plist 는 `MagicFormula/configs/launchd/` 쪽 사본이다.**
+이 리포의 `configs/launchd/` 사본은 SpotGauge 경로로 미리 고쳐 둔 **이관용**이라
+아직 등록돼 있지 않다 — 등록 절차는 `MIGRATION.md` 3단계.
+
+⚠ **경로 해석**: `STOLAB` 은 `_stolab.py:find_stolab()` 이 **형제 프로젝트 존재
+여부**로 판정한다. 종전의 `dirname(dirname(FM))` 깊이 고정식은 SpotGauge 로 옮기면
+한 단계 어긋나 LLV parquet 과 SMTP `.env` 를 못 찾는다 — 예외 없이 조용히 실패하는
+경로라 2026-08-26 선제 교체했다. 이관 전·후 반환값이 동일함은 실측 확인.
+필요하면 환경변수 `STOLAB_DIR` 로 덮어쓸 수 있다.
 ⚠ `clustering_ts/` 원본(전체 실험 파이프라인)은 이 폴더 밖에 있다. 여기 있는 건
 **운영에 필요한 최소 집합**. 재실험이 필요하면 원본 폴더 반입 필요.
 

@@ -26,22 +26,27 @@ MagicFormula(황금률만들기)는 Kane의 한국 주식 투자 시스템에서
 로직을 소유하는 리포**다. "언제 무엇을 살 것인가"를 계산해 신호를 뱉는 일만 하고,
 데이터 수집은 longlivevault가, 계좌·체결·서빙은 StockPortfolio가, 화면은
 homalone(8501)이 맡는다 — 이 분업은 바꾸지 않는다는 것이 전제다. 현재 성격이 서로
-다른 룰 4개(황금률·데이 포트·스윙 포트·발열률)를 한 지붕 아래 두되, **룰끼리
+다른 매매 룰 3개(황금률·데이 포트·스윙 포트)를 한 지붕 아래 두되, **룰끼리
 파라미터와 어휘를 섞지 않는 것**을 원칙으로 운영한다. 각 룰은 매일 정해진 시각에
 launchd 잡으로 자동 산출되고, 결과는 메일·푸시·웹 화면으로 나간다. `[문서]`
+
+⚠ **2026-08-26 Kane 결정 — 발열률은 현물게이지(SpotGauge) 로 분리한다.** 진입·청산
+규칙이 없는 **관측 모델**이라 "매매 룰의 판단 소유자"라는 이 리포 정의에 맞지 않는다.
+**폴더 이동은 아직 미실행** — 절차는 `fever_model/MIGRATION.md`. 아래 발열률 서술은
+이관 후 SpotGauge 로 그대로 옮겨갈 **이력**으로 읽을 것. `[문서]`
 
 ---
 
 ## 2. 현재 상태
 
-### 2.1 룰 4개 요약 `[문서]`
+### 2.1 룰 요약 — 매매 룰 3개 (+ 이관 중인 관측 모델 1개) `[문서]`
 
 | # | 룰 | 버전 · 확정일 | 스펙 정본 | 성격 |
 |---|---|---|---|---|
 | 1 | **황금률** | `COMBINED-v2-2026-05` (2026-05-31 승격) | `configs/active_strategy.yaml` | 진입 신호 (종목 점수) |
 | 2 | **데이 포트** | **v1.1.2.2** (2026-08-24~) | `$STOLAB/StockPortfolio/app/paper_day/config.py` | 1일 스윙 (ML) |
 | 3 | **스윙 포트** | **v1.2.2.3** (2026-08-17) | `korean_mkt_study/STRATEGY.md` + `strategy_spec.json` | 눌림목 진입 |
-| 4 | **발열률** | 2026-08-14 구축 | `fever_model/CLAUDE.md` | 시장온도 + 관측 명단 |
+| — | ~~**발열률**~~ | 2026-08-14 구축 · **2026-08-26 SpotGauge 로 분리 결정** | `SpotGauge/CLAUDE.md` (이관 전 `fever_model/CLAUDE.md`) | 시장 관측기 — **매매 룰 아님** |
 
 버전 체계 = **모델.유니버스.진입.청산** (각 자리 최초 1, 조정마다 +1).
 Kane 도입 2026-08-23, 스윙·데이 공통. `[문서]`
@@ -72,9 +77,11 @@ D+6~ 피크>평단   피크   × (1 − clip(0.05 × 배율, 0.03, 0.15))
 D+6~ 피크≤평단   평단   × (1 − clip(0.10 × 배율, 0.05, 0.25))
 ```
 
-**4. 발열률** — 1단 시장온도 나우캐스트 → 2단 Vblk 탄력점수
-(추세 33 : 눌림진폭 17 : 눌림거래량 17 : YZ 33). 관측 지평 20~60거래일. `[문서]`
-⚠ **매수 신호가 아니라 관측 명단**이다 — 진입·청산 규칙이 없다.
+**(이관 중) 발열률 → 현물게이지(SpotGauge)** — 1단 시장온도 나우캐스트 → 2단 Vblk
+탄력점수 (추세 33 : 눌림진폭 17 : 눌림거래량 17 : YZ 33). 관측 지평 20~60거래일. `[문서]`
+⚠ **매수 신호가 아니라 관측 명단**이다 — 진입·청산 규칙이 없다. 이것이 분리 사유다.
+⚠ **이 리포에서 발열률 로직을 더 손대지 않는다.** 아래 파라미터 서술은 이관 시
+SpotGauge 로 넘길 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파라미터 정본.
 
 ⚠ **1단과 2단은 창이 다르다** `[실측]` (2026-08-25 코드 추적으로 확정). 실효값은
 `fever_model/src/daily_WW_wf.py` L65~69 상수가 전부다 — 이 파일은 `nowcast_grid.py`·
@@ -90,7 +97,7 @@ D+6~ 피크≤평단   평단   × (1 − clip(0.10 × 배율, 0.05, 0.25))
 `resilience_*.py` 의 `MIN_WAVES = 6` 은 **2단 로직 출처**라 모순이 아니고,
 `nowcast_grid.py` 의 6 은 1단 구기준이다. 정본에도 명문화해 뒀다.
 
-### 2.2 동작 중인 자동 잡 (MagicFormula 소유 7개) `[실측]`
+### 2.2 동작 중인 자동 잡 (현재 7개 — 이관 후 MagicFormula 5 + SpotGauge 2) `[실측]`
 
 | 시각 | 반복 | 레이블 | 내용 |
 |---|---|---|---|
@@ -98,14 +105,18 @@ D+6~ 피크≤평단   평단   × (1 − clip(0.10 × 배율, 0.05, 0.25))
 | 16:20 | 매일 | `com.kane.magicformula-mop-signal` | 데이 포트 익일 신호 (`run_daily.py --rebuild`) |
 | 16:30 / 20:40 | 평일 | `com.stolab.magic-formula.daily-signal` | 황금률 점수 (1차 / 수급 반영 2차) |
 | 16:35 / 20:45 | 평일 | `com.stolab.magic-formula.daily-extended-signal` | 황금률 확장 시그널 |
-| 16:30 | 평일 | `com.kane.fever-rule-daily` | 발열률 워크포워드 |
-| 17:00 | 평일 | `com.kane.fever-rule-mail` | 발열률 메일 |
+| 16:30 | 평일 | `com.kane.fever-rule-daily` | 발열률 워크포워드 — **→ SpotGauge 이관 대상** |
+| 17:00 | 평일 | `com.kane.fever-rule-mail` | 발열률 메일 — **→ SpotGauge 이관 대상** |
 | 20:35 | 평일 | `com.kane.kms-shadow-track` | 스윙 포트 그림자 추적 (`shadow_track.py`) |
 
 plist 정본은 `configs/launchd/`, 운영본은 `~/Library/LaunchAgents/` 심링크.
 **단 발열률 2개는 심링크가 아니라 복사본** — 수정하면 재복사해야 한다.
 `[실측]` 2026-08-25 확인: 7개 전부 launchctl 등재 + 최근 종료코드 0, 발열률 2개만
 복사본(`-rw-`)이고 나머지 5개는 심링크가 맞다.
+
+⚠ 발열률 2개는 이관 시 **경로가 바뀌므로 재등록이 필수**다. SpotGauge 경로로 고친
+plist 사본을 `fever_model/configs/launchd/` 에 미리 만들어 뒀다 (아직 미등록).
+등록 명령은 `fever_model/MIGRATION.md` 4단계.
 
 ✅ `[실측]` 종전 "`$STOLAB/StockPortfolio/SCHEDULED_TASKS.md` 에
 `kms-shadow-track` 누락" 은 **해소**. 같은 점검에서 `longlivevault-{foreign-0811,
@@ -133,6 +144,8 @@ volscale-2050, derivatives-merge}` 3건도 빠져 있어 함께 채웠고, 등�
 - **스윙 포트 그림자 v1.1.1.2** — 직전 운영 모델(4조/25% · 60일/MA120)을 다음 달
   모델 평가까지 추적. 평일 20:35
 - **발열률 8/7 빈티지 채점** — 20거래일(9월 4일경) · 60거래일(11월 초) 예정
+  ⚠ **이관 후 SpotGauge 소관.** 9월 4일이 이관 예정일과 가까우니 유실 주의 —
+  `SpotGauge/CLAUDE.md` §검산 에도 같은 일정이 적혀 있다.
 
 ---
 
@@ -312,13 +325,18 @@ $STOLAB/MagicFormula/
 │       ├── universe_2026-08_4jo_30pct.json   ★ 현행 유니버스 41종목
 │       └── shadow_v1112_state.json           그림자 상태
 │
-├── fever_model/                 ── 발열률
+├── fever_model/                 ── 발열률 ⚠ SpotGauge 로 이관 예정 (2026-08-26)
+│   ├── MIGRATION.md             ★ 이관 체크리스트 (케인 실행)
+│   ├── README.md                프로젝트 개요 · 분리 근거
 │   ├── CLAUDE.md                ★ 스펙 정본
+│   ├── configs/launchd/         SpotGauge 경로 plist 2개 (미등록 — 이관용)
 │   ├── src/daily_WW_wf.py       ★ 평일 16:30 운영 정본
 │   ├── src/send_fever_mail.py   17:00 메일 (계산 없음)
+│   ├── src/_stolab.py           StoLab 루트 탐색 (이관 안전장치 — 08-26 신설)
 │   ├── src/{nowcast_grid,resilience_v2,resilience_score}.py   로직 출처(실험 원본)
 │   ├── data/panel_states.csv    고정 모델 (스케일러+중심점), 191종목
 │   └── output/                  온도일지·국면일지·탄력점수일지 + 메일/8501용 산출물
+│                                ⚠ git 미추적 — 이관 시 수동 복사 필수 (MIGRATION §3)
 │
 ├── scripts/                     ── 배치·검증
 │   ├── daily_signal.py          ★ 황금률 16:30/20:40
@@ -460,9 +478,20 @@ Wyckoff는 황금률의 5번째 점수 요소가 아니라 **게이트**다. `[�
 | **hillstorm** | `$STOLAB/hillstorm` | Wyckoff 분류 엔진 (LLV가 위임 호출) |
 | **homalone (아웃퍼포머)** | 8501 포트 | 화면 — Quickview(황금률) · Temp.View(발열률) |
 | **MorningBrief** | `$STOLAB/MorningBrief` | 메일·Pushover 발송 위임 |
+| **SpotGauge (현물게이지)** | `$STOLAB/SpotGauge` | **신설 예정** — 발열률 이관처. LLV 읽기 + 8501 Temp.View·메일 산출. MagicFormula 와 코드 의존 없음 |
 
 ⚠ **형제 폴더 배치가 곧 설정이다.** SP의 `app/core/config.py`가 `StoLab/` 아래
 형제 폴더 기준으로 경로를 계산하므로, 폴더 이름·위치를 바꾸면 서버가 안 뜬다. `[문서]`
+
+⚠ **발열률 이관이 이 성질을 정면으로 건드린다.** `fever_model` 의 종전 경로식은
+폴더 깊이(`dirname`×2)로 StoLab 을 잡아서, 한 단계 얕아지는 SpotGauge 로 옮기면
+LLV·`.env` 를 못 찾고 **예외 없이 무산출·무발송**이 된다. 2026-08-26
+`fever_model/src/_stolab.py` 로 선제 교체(형제 프로젝트 존재 여부로 판정, 이관 전후
+동일 반환 실측 확인). `[실측]`
+❓ **미확인** — homalone 이 `발열률_전체.csv` 를 어느 경로로 읽는지는 이 세션에서
+확인하지 못했다(homalone 리포 미접근). 하드코딩된 `MagicFormula/fever_model/output/`
+이 있으면 이관 시 Temp.View 가 빈다. **이관 전 `grep -rn "fever_model" $STOLAB/homalone`
+필수** — MIGRATION §7.
 ⚠ **MagicFormula는 LLV에 쓰지 않는다.** 판단은 여기, 데이터는 LLV — 이 분업을 깨면
 `_upsert_and_recompute` 계약과 충돌한다.
 
