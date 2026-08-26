@@ -141,7 +141,7 @@ plist 정본: `configs/launchd/com.kane.fever-rule-{daily,mail}.plist` (이 리�
 올라가 있으므로 **plist 수정 시 재복사 필요**.
 ⚠ **이관 전까지 현재 가동 중인 plist 는 `MagicFormula/configs/launchd/` 쪽 사본이다.**
 이 리포의 `configs/launchd/` 사본은 SpotGauge 경로로 미리 고쳐 둔 **이관용**이라
-아직 등록돼 있지 않다 — 등록 절차는 `MIGRATION.md` 3단계.
+아직 등록돼 있지 않다 — 등록 절차는 `MIGRATION.md` **4단계**.
 
 ⚠ **경로 해석**: `STOLAB` 은 `_stolab.py:find_stolab()` 이 **형제 프로젝트 존재
 여부**로 판정한다. 종전의 `dirname(dirname(FM))` 깊이 고정식은 SpotGauge 로 옮기면
