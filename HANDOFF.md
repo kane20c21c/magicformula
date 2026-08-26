@@ -30,10 +30,9 @@ homalone(8501)이 맡는다 — 이 분업은 바꾸지 않는다는 것이 전�
 파라미터와 어휘를 섞지 않는 것**을 원칙으로 운영한다. 각 룰은 매일 정해진 시각에
 launchd 잡으로 자동 산출되고, 결과는 메일·푸시·웹 화면으로 나간다. `[문서]`
 
-⚠ **2026-08-26 Kane 결정 — 발열률은 현물게이지(SpotGauge) 로 분리한다.** 진입·청산
-규칙이 없는 **관측 모델**이라 "매매 룰의 판단 소유자"라는 이 리포 정의에 맞지 않는다.
-**폴더 이동은 아직 미실행** — 절차는 `fever_model/MIGRATION.md`. 아래 발열률 서술은
-이관 후 SpotGauge 로 그대로 옮겨갈 **이력**으로 읽을 것. `[문서]`
+⚠ **2026-08-26 발열률을 현물게이지(SpotGauge) 로 분리했다** (결정·실행 완료). 진입·청산
+규칙이 없는 **관측 모델**이라 "매매 룰의 판단 소유자"라는 이 리포 정의에 맞지 않았다.
+아래 발열률 서술은 **이력**이며, 살아 있는 정본은 `SpotGauge/CLAUDE.md` 다. `[문서]`
 
 ---
 
@@ -43,19 +42,31 @@ launchd 잡으로 자동 산출되고, 결과는 메일·푸시·웹 화면으�
 
 | # | 룰 | 버전 · 확정일 | 스펙 정본 | 성격 |
 |---|---|---|---|---|
-| 1 | **황금률** | `COMBINED-v2-2026-05` (2026-05-31 승격) | `configs/active_strategy.yaml` | 진입 신호 (종목 점수) |
+| 1 | **황금률** | **`COMBINED-v3-2026-08`** (2026-08-25 승격) | `configs/active_strategy.yaml` | 진입 신호 (종목 점수) |
 | 2 | **데이 포트** | **v1.1.2.2** (2026-08-24~) | `$STOLAB/StockPortfolio/app/paper_day/config.py` | 1일 스윙 (ML) |
 | 3 | **스윙 포트** | **v1.2.2.3** (2026-08-17) | `korean_mkt_study/STRATEGY.md` + `strategy_spec.json` | 눌림목 진입 |
-| — | ~~**발열률**~~ | 2026-08-14 구축 · **2026-08-26 SpotGauge 로 분리 결정** | `SpotGauge/CLAUDE.md` (이관 전 `fever_model/CLAUDE.md`) | 시장 관측기 — **매매 룰 아님** |
+| — | ~~**발열률**~~ | 2026-08-14 구축 · **2026-08-26 SpotGauge 로 분리 완료** | `SpotGauge/CLAUDE.md` | 시장 관측기 — **매매 룰 아님. 이 리포 소관 아님** |
 
 버전 체계 = **모델.유니버스.진입.청산** (각 자리 최초 1, 조정마다 +1).
 Kane 도입 2026-08-23, 스윙·데이 공통. `[문서]`
 
-**1. 황금률** — 4영역 robust 가중 결합 **추세 20 / 모멘텀 20 / 거래량 0 / 변동성 60**
+**1. 황금률** — 4영역 가중 결합 **추세 0 / 모멘텀 80 / 거래량 0 / 변동성 20**
 + Wyckoff 게이트(Markdown 국면 매수 제외). 진입 = 종합점수 **6.0 상향돌파**,
 체결 다음날 시가. 청산 = 진입가 −ATR(14)×1 손절 / 20거래일 + 누적손익 ≤0% 시간청산.
 종목당 상한 10,000,000원, 후보 임계 5.0. `[문서]`
-⚠ **점수 자체의 예측력이 2026-08-24 검증에서 부정됐다** — §3.6 · §5.1 참조.
+
+```
+종합점수 = 0.8 × (RSI(14) − 50)/5
+         + 0.2 × [ 0.6 × (52주위치 − 0.5)×20 + 0.4 × BB꺾임점수 ]
+```
+
+⚠ **이 점수는 예측 모델이 아니라 상위 선별기다.** v2 는 IC −0.015(p=0.0004)로
+**유의하게 음수**였고, v3 는 +0.007(p=0.25)로 음수를 0 근처까지 끌어올렸을 뿐
+예측력을 확보한 것이 아니다. 이득이 10분위 중 최상위에만 몰려 있다 — §3.6 · §5.1 참조.
+⚠ **추세·거래량은 가중 0 이라 종합점수에 안 들어간다.** Quickview 4영역 배지에는
+계속 보이지만 뒤 둘은 참고값이다.
+⚠ 롤백 = `configs/active_strategy_v2.yaml` 복원 + `score_momentum_step()` ·
+`score_volatility_table()` 로 되돌리기 (두 함수 보존됨).
 
 **2. 데이 포트** — 16:20 신호 → **17:00 NXT 애프터마켓 10슬롯 × 2,000,000원** 매수
 → 청산 = 당일고점 −1% 트레일링 + 첫 관측 갭 관문 −5%. 충원 컷은 `p ≥ 0.925`
@@ -80,11 +91,11 @@ D+6~ 피크≤평단   평단   × (1 − clip(0.10 × 배율, 0.05, 0.25))
 **(이관 중) 발열률 → 현물게이지(SpotGauge)** — 1단 시장온도 나우캐스트 → 2단 Vblk
 탄력점수 (추세 33 : 눌림진폭 17 : 눌림거래량 17 : YZ 33). 관측 지평 20~60거래일. `[문서]`
 ⚠ **매수 신호가 아니라 관측 명단**이다 — 진입·청산 규칙이 없다. 이것이 분리 사유다.
-⚠ **이 리포에서 발열률 로직을 더 손대지 않는다.** 아래 파라미터 서술은 이관 시
-SpotGauge 로 넘길 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파라미터 정본.
+⚠ **이 리포에서 발열률 로직을 더 손대지 않는다.** 아래 파라미터 서술은 이관과 함께
+SpotGauge 로 넘어간 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파라미터 정본.
 
 ⚠ **1단과 2단은 창이 다르다** `[실측]` (2026-08-25 코드 추적으로 확정). 실효값은
-`fever_model/src/daily_WW_wf.py` L65~69 상수가 전부다 — 이 파일은 `nowcast_grid.py`·
+`SpotGauge/src/daily_WW_wf.py` L65~69 상수가 전부다 — 이 파일은 `nowcast_grid.py`·
 `resilience_v2.py` 를 **import 하지 않고 로직만 이식**했다.
 
 | 단 | 상수 | 값 |
@@ -97,7 +108,7 @@ SpotGauge 로 넘길 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파라�
 `resilience_*.py` 의 `MIN_WAVES = 6` 은 **2단 로직 출처**라 모순이 아니고,
 `nowcast_grid.py` 의 6 은 1단 구기준이다. 정본에도 명문화해 뒀다.
 
-### 2.2 동작 중인 자동 잡 (현재 7개 — 이관 후 MagicFormula 5 + SpotGauge 2) `[실측]`
+### 2.2 동작 중인 자동 잡 (MagicFormula 소유 **5개**) `[실측]`
 
 | 시각 | 반복 | 레이블 | 내용 |
 |---|---|---|---|
@@ -105,18 +116,16 @@ SpotGauge 로 넘길 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파라�
 | 16:20 | 매일 | `com.kane.magicformula-mop-signal` | 데이 포트 익일 신호 (`run_daily.py --rebuild`) |
 | 16:30 / 20:40 | 평일 | `com.stolab.magic-formula.daily-signal` | 황금률 점수 (1차 / 수급 반영 2차) |
 | 16:35 / 20:45 | 평일 | `com.stolab.magic-formula.daily-extended-signal` | 황금률 확장 시그널 |
-| 16:30 | 평일 | `com.kane.fever-rule-daily` | 발열률 워크포워드 — **→ SpotGauge 이관 대상** |
-| 17:00 | 평일 | `com.kane.fever-rule-mail` | 발열률 메일 — **→ SpotGauge 이관 대상** |
 | 20:35 | 평일 | `com.kane.kms-shadow-track` | 스윙 포트 그림자 추적 (`shadow_track.py`) |
 
 plist 정본은 `configs/launchd/`, 운영본은 `~/Library/LaunchAgents/` 심링크.
-**단 발열률 2개는 심링크가 아니라 복사본** — 수정하면 재복사해야 한다.
-`[실측]` 2026-08-25 확인: 7개 전부 launchctl 등재 + 최근 종료코드 0, 발열률 2개만
-복사본(`-rw-`)이고 나머지 5개는 심링크가 맞다.
+`[실측]` 2026-08-25 확인: 전부 launchctl 등재 + 최근 종료코드 0.
 
-⚠ 발열률 2개는 이관 시 **경로가 바뀌므로 재등록이 필수**다. SpotGauge 경로로 고친
-plist 사본을 `fever_model/configs/launchd/` 에 미리 만들어 뒀다 (아직 미등록).
-등록 명령은 `fever_model/MIGRATION.md` 4단계.
+⚠ **발열률 2개(`com.kane.fever-rule-{daily,mail}`, 16:30/17:00)는 이 리포 소관이
+아니다.** 2026-08-26 SpotGauge 로 이관하며 plist 정본도
+`SpotGauge/configs/launchd/` 로 옮기고 재등록했다 — 이 리포의
+`configs/launchd/` 에서는 삭제됐다. 그 둘만 심링크가 아니라 **복사본**으로
+등록돼 있어 수정 시 재복사가 필요하다는 점은 SpotGauge 쪽에 기록해 뒀다.
 
 ✅ `[실측]` 종전 "`$STOLAB/StockPortfolio/SCHEDULED_TASKS.md` 에
 `kms-shadow-track` 누락" 은 **해소**. 같은 점검에서 `longlivevault-{foreign-0811,
@@ -325,18 +334,8 @@ $STOLAB/MagicFormula/
 │       ├── universe_2026-08_4jo_30pct.json   ★ 현행 유니버스 41종목
 │       └── shadow_v1112_state.json           그림자 상태
 │
-├── fever_model/                 ── 발열률 ⚠ SpotGauge 로 이관 예정 (2026-08-26)
-│   ├── MIGRATION.md             ★ 이관 체크리스트 (케인 실행)
-│   ├── README.md                프로젝트 개요 · 분리 근거
-│   ├── CLAUDE.md                ★ 스펙 정본
-│   ├── configs/launchd/         SpotGauge 경로 plist 2개 (미등록 — 이관용)
-│   ├── src/daily_WW_wf.py       ★ 평일 16:30 운영 정본
-│   ├── src/send_fever_mail.py   17:00 메일 (계산 없음)
-│   ├── src/_stolab.py           StoLab 루트 탐색 (이관 안전장치 — 08-26 신설)
-│   ├── src/{nowcast_grid,resilience_v2,resilience_score}.py   로직 출처(실험 원본)
-│   ├── data/panel_states.csv    고정 모델 (스케일러+중심점), 191종목
-│   └── output/                  온도일지·국면일지·탄력점수일지 + 메일/8501용 산출물
-│                                ⚠ git 미추적 — 이관 시 수동 복사 필수 (MIGRATION §3)
+│   ⚠ fever_model/ 은 2026-08-26 **$STOLAB/SpotGauge 로 떠났다** — 이 트리에 없다.
+│     발열률 작업은 그 리포에서 한다 (스펙 정본 `SpotGauge/CLAUDE.md`).
 │
 ├── scripts/                     ── 배치·검증
 │   ├── daily_signal.py          ★ 황금률 16:30/20:40
@@ -483,15 +482,14 @@ Wyckoff는 황금률의 5번째 점수 요소가 아니라 **게이트**다. `[�
 ⚠ **형제 폴더 배치가 곧 설정이다.** SP의 `app/core/config.py`가 `StoLab/` 아래
 형제 폴더 기준으로 경로를 계산하므로, 폴더 이름·위치를 바꾸면 서버가 안 뜬다. `[문서]`
 
-⚠ **발열률 이관이 이 성질을 정면으로 건드린다.** `fever_model` 의 종전 경로식은
-폴더 깊이(`dirname`×2)로 StoLab 을 잡아서, 한 단계 얕아지는 SpotGauge 로 옮기면
-LLV·`.env` 를 못 찾고 **예외 없이 무산출·무발송**이 된다. 2026-08-26
-`fever_model/src/_stolab.py` 로 선제 교체(형제 프로젝트 존재 여부로 판정, 이관 전후
-동일 반환 실측 확인). `[실측]`
-❓ **미확인** — homalone 이 `발열률_전체.csv` 를 어느 경로로 읽는지는 이 세션에서
-확인하지 못했다(homalone 리포 미접근). 하드코딩된 `MagicFormula/fever_model/output/`
-이 있으면 이관 시 Temp.View 가 빈다. **이관 전 `grep -rn "fever_model" $STOLAB/homalone`
-필수** — MIGRATION §7.
+✅ **발열률 이관(2026-08-26)이 이 성질을 정면으로 건드렸고, 둘 다 해소했다.** `[실측]`
+① 종전 경로식이 폴더 깊이(`dirname`×2)로 StoLab 을 잡아서, 한 단계 얕아진 SpotGauge
+에서는 LLV·`.env` 를 놓치고 **예외 없이 무산출·무발송**이 된다 →
+`SpotGauge/src/_stolab.py` 로 선제 교체(형제 프로젝트 존재 여부로 판정).
+② homalone `4_Temp.View.py` 가 `MagicFormula/fever_model/output/` 을 하드코딩하고
+있었다 → `config.SPOTGAUGE_DIR` 신설 후 그걸 참조하게 수정.
+**리포를 옮길 때는 형제 경로를 하드코딩한 소비자를 반드시 grep 할 것** —
+`grep -rn "<옛 폴더명>" $STOLAB` 이 이번에 유일한 코드 파손 지점을 잡아냈다.
 ⚠ **MagicFormula는 LLV에 쓰지 않는다.** 판단은 여기, 데이터는 LLV — 이 분업을 깨면
 `_upsert_and_recompute` 계약과 충돌한다.
 
