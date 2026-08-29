@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git -C * push:*)",
+      "Bash(git -c * push:*)",
+      "Bash(git --git-dir * push:*)",
+      "Bash(git -C * -c * push:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh repo sync:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(rsync:*)",
+      "Bash(launchctl:*)",
+      "Bash(sudo launchctl:*)",
+      "Write(~/DriveForALL/**)",
+      "Edit(~/DriveForALL/**)",
+      "MultiEdit(~/DriveForALL/**)",
+      "NotebookEdit(~/DriveForALL/**)"
+    ]
+  }
+}

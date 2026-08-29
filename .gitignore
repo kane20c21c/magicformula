@@ -84,3 +84,7 @@ korean_mkt_study/out/
 # 재설계 검증 패널 캐시 (재생성 가능 — build 서브커맨드)
 output/area_redesign_panel.parquet
 output/redesign_pos52_panel.parquet
+
+# Claude 설정 — 공유 deny 규칙만 추적, 로컬 설정은 제외
+.claude/*
+!.claude/settings.json
