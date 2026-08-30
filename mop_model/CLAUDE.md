@@ -82,9 +82,13 @@ python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테�
 `p ≥ 0.925` 이고 `rank ≤ 15` 인 종목까지만 충원하고, **슬롯을 못 채우면 비워둔다**.
 정본은 `StockPortfolio/app/paper_day/config.py` 의 `min_signal_p` / `fill_max_rank`
 — 여기(mop_model)는 순위와 p 만 공급하고 컷은 하지 않는다.
-⚠ 슬롯 수는 소비자 소관이고 **2026-08-24 부터 10슬롯**(v1.1.2.2, `data/paper_day/
-config.json` 오버라이드)이다. 이 문서의 "Top5" 표기와 `strategy_id: mop_ml_top5` 는
+⚠ 슬롯 수는 소비자 소관이고 **2026-08-24 부터 10슬롯**(`data/paper_day/config.json`
+오버라이드)이다. 이 문서의 "Top5" 표기와 `strategy_id: mop_ml_top5` 는
 **모델 이름의 잔재**일 뿐 슬롯 수를 뜻하지 않는다.
+⚠ 청산 규칙은 **2026-08-31 부터 v1.1.2.3** — 쇼크일(TIGER200 갭≤−2% & 갭≤−3%
+종목 ≥50) 관문 유예 + 15:00 거래량(MA20) 이월 판정. 정본·상세는 SP
+`app/paper_day/config.py`·`app/paper_day/shockday.py`, 근거는 SP
+`reports/데이포트_갭다운_시장단면_20260830.html` (케인 A/B 패턴).
 
 ## 섹터 오버나이트 게이지 (15:10 잠정 — Kane 지시 2026-07-30)
 
