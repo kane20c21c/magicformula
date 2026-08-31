@@ -85,6 +85,15 @@ korean_mkt_study/out/
 output/area_redesign_panel.parquet
 output/redesign_pos52_panel.parquet
 
+# ── 리포 루트의 일회성 연구 산출물 (2026-08-31 Kane 결정) ──
+# 분석용으로 만든 패널·표는 결론이 리포트와 옵시디언 노트에 남으면 역할이 끝난다.
+# 리포 루트에 쌓아두면 매번 git status 를 어지럽히고, 언젠가 "정본인가?" 하고
+# 헷갈리게 된다. 정본은 언제나 LLV parquet 이고 이건 그 파생물이다.
+# (계기: open30_20d.parquet + 개장4시점 가격표 — 갭 연구 종결 후 삭제.
+#  재생성은 KIS 재수집으로 가능하다.)
+/*.parquet
+/*.xlsx
+
 # Claude 설정 — 공유 deny 규칙만 추적, 로컬 설정은 제외
 .claude/*
 !.claude/settings.json
