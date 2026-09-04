@@ -77,6 +77,14 @@ class EntryParams:
     trend_min_periods: int = 140
     pullback_pct: float = 0.10                    # close <= (1-0.10) * high_n
 
+    # ── 축 M: 추세선 종류 (2026-09-04 Kane 요청) ──
+    #   "sma"   : 종가 단순이동평균 — v1.0.0~v1.2.2.3 정본
+    #   "evwma" : Elastic Volume Weighted MA (LLV `_evwma_one` 정본 공식)
+    #             유동물량 V(=n일 거래량 합) 대비 그날 거래된 만큼만 평단이 교체된다.
+    #   ⚠ evwma 는 `trend_min_periods` 가 **V 의 min_periods** 로 쓰인다.
+    #     LLV 운영 컬럼(EVWMA_200)과 값을 맞추려면 trend_min_periods=trend_ma (엄격).
+    trend_ma_kind: str = "sma"
+
     # ── 눌림 기준 (pattern_study.py 격자 연구, 2026-08-17) ──
     #   "high"     : 종가 ≤ (1−pullback_pct) × N일 최고종가   (현행)
     #   "low_prox" : 종가 ≤ (1+low_tol) × 직전 N일 최저종가   (저점 근접 — Kane 안)
@@ -186,6 +194,7 @@ class Panel:
     high: pd.DataFrame
     low: pd.DataFrame
     close: pd.DataFrame
+    volume: pd.DataFrame        # EVWMA 추세선용 (SMA 경로에서는 안 쓴다)
     elig: pd.DataFrame          # 일별 유니버스 편입 bool
     yz20: pd.DataFrame
     vol_scale: pd.DataFrame
@@ -236,6 +245,62 @@ def _yang_zhang(op: pd.DataFrame, hi: pd.DataFrame, lo: pd.DataFrame,
     return np.sqrt(var.clip(lower=0))
 
 
+def _evwma_col(close: np.ndarray, vol: np.ndarray, n: int, min_periods: int) -> np.ndarray:
+    """단일 종목 EVWMA. **LLV `indicator_calculator._evwma_one()` 이식** (2026-09-04).
+
+        EVWMA_t = EVWMA_{t-1} · (V_t − v_t)/V_t  +  Close_t · v_t/V_t
+        V_t = 직전 n거래일 거래량 합 (= '유동물량')
+
+    "그날 거래된 물량만큼만 평단이 교체된다" 는 해석. 거래가 없으면 값이 그대로
+    유지되고, 하루 거래량이 유동물량에 가까울수록 종가에 붙는다.
+
+    ⚠ LLV 정본과 다른 점은 `min_periods` 를 인자로 받는다는 것 하나뿐이다.
+      LLV 는 엄격(=n) 고정인데, 여기서는 SMA(140) 와 조건을 맞춘 대조군을 함께
+      재기 위해 열어 뒀다. **운영 컬럼(LLV EVWMA_200)과 값을 맞추려면 n 을 줄 것.**
+
+    ⚠ 재귀식이라 벡터화하지 않았다 (LLV 주석과 동일 사유 — cumprod 로 풀면
+      v_t/V_t 가 1 에 가까울 때 곱누적이 0 으로 붕괴해 나눗셈이 발산한다).
+
+    ⚠ **첫 유효일 값은 그날 종가 자체다.** 따라서 워밍업 직후 구간은
+      `close > EVWMA` 가 거의 항상 참이 된다 — 백테스트 시작일보다 앞선 데이터로
+      워밍업을 흡수시켜야 이 편향이 성과에 안 섞인다 (load_panel 의 warmup 참조).
+    """
+    N = len(close)
+    out = np.full(N, np.nan)
+    if N == 0:
+        return out
+    V = pd.Series(vol).rolling(n, min_periods=min_periods).sum().to_numpy(dtype=float)
+    prev = np.nan
+    for i in range(N):
+        if not np.isfinite(V[i]) or V[i] <= 0 or not np.isfinite(close[i]):
+            continue
+        if not np.isfinite(prev):
+            prev = close[i]                    # 첫 유효일은 종가에서 출발
+        v = vol[i] if np.isfinite(vol[i]) else 0.0
+        v = min(v, V[i])                       # 하루 거래량이 창 합을 넘지 않게
+        prev = prev * (V[i] - v) / V[i] + close[i] * v / V[i]
+        out[i] = prev
+    return out
+
+
+def _evwma(cl: pd.DataFrame, vol: pd.DataFrame, n: int, min_periods: int) -> pd.DataFrame:
+    """종목별 EVWMA (파이썬 루프 — 종목 수 × 거래일 수)."""
+    v = vol.reindex_like(cl)
+    out = {t: _evwma_col(cl[t].to_numpy(dtype=float), v[t].to_numpy(dtype=float),
+                         n, min_periods)
+           for t in cl.columns}
+    return pd.DataFrame(out, index=cl.index, columns=cl.columns)
+
+
+def _trend_ma(p: "Panel", ep: "EntryParams") -> pd.DataFrame:
+    """추세선. 종류 축은 여기 한 곳에서만 갈린다."""
+    if ep.trend_ma_kind == "sma":
+        return p.close.rolling(ep.trend_ma, min_periods=ep.trend_min_periods).mean()
+    if ep.trend_ma_kind == "evwma":
+        return _evwma(p.close, p.volume, ep.trend_ma, ep.trend_min_periods)
+    raise ValueError(f"unknown trend_ma_kind: {ep.trend_ma_kind}")
+
+
 def load_panel(up: UniverseParams, vp: VolScaleParams,
                start: str = "2013-01-01", end: str = "2026-06-30") -> Panel:
     elig_m = _monthly_eligibility(up)
@@ -247,7 +312,7 @@ def load_panel(up: UniverseParams, vp: VolScaleParams,
             (px.index.get_level_values("date") <= pd.Timestamp(end))]
 
     wide = {c: px[c].astype("float64").unstack("ticker").sort_index()
-            for c in ("open", "high", "low", "close")}
+            for c in ("open", "high", "low", "close", "volume")}
     dates = wide["close"].index
     tickers = wide["close"].columns
 
@@ -270,7 +335,7 @@ def load_panel(up: UniverseParams, vp: VolScaleParams,
         names = {}
 
     return Panel(wide["open"], wide["high"], wide["low"], wide["close"],
-                 elig_d, yz, scale, dates, tickers, names)
+                 wide["volume"], elig_d, yz, scale, dates, tickers, names)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -302,7 +367,7 @@ def compute_signals(p: Panel, ep: EntryParams) -> dict:
     confirm 을 주면 같은 눌림 구간(episode) 안에서 확인 조건이 처음 참인 날로 미룬다.
     """
     cl = p.close
-    ma = cl.rolling(ep.trend_ma, min_periods=ep.trend_min_periods).mean()
+    ma = _trend_ma(p, ep)
     margin = cl / ma - 1.0                        # 추세 MA 대비 여력
 
     if ep.dip_basis == "high":
