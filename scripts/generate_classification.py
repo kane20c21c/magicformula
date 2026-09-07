@@ -52,10 +52,28 @@ def load_config() -> dict:
 
 
 def _sector_map() -> dict[str, str]:
-    """LLV 의 정본 종목→섹터 (TICKER_LIST + EXTEND_LIST)."""
+    """LLV 의 정본 종목→**화면 섹터** (TICKER_LIST + EXTEND_LIST)."""
     sys.path.insert(0, str(STOLAB / "longlivevault"))
     from stolab_data import TICKER_LIST, EXTEND_LIST  # noqa: E402
     return {t[0]: t[2] for t in list(TICKER_LIST) + list(EXTEND_LIST)}
+
+
+def _agg_map(cfg: dict) -> dict[str, str]:
+    """화면 섹터 → **분류 섹터** 집계 맵 (classification.yaml `sector_aggregation`).
+
+    섹터 성격 판정이 R² **중앙값**이라 표본이 작으면 한 종목에 뒤집힌다.
+    화면은 세분화가 값어치이고 분류는 표본이 값어치라, 두 축을 분리한다.
+    맵에 없는 섹터는 화면 섹터를 그대로 쓴다. 근거·주의는 yaml 주석 참조.
+    """
+    out: dict[str, str] = {}
+    for group, members in (cfg.get("sector_aggregation") or {}).items():
+        for m in members:
+            if m in out:
+                raise SystemExit(
+                    f"❌ sector_aggregation 중복: '{m}' 이 '{out[m]}' 와 '{group}' 양쪽에 있다"
+                )
+            out[m] = group
+    return out
 
 
 def _name_map() -> dict[str, str]:
@@ -83,7 +101,8 @@ def compute(cfg: dict) -> dict:
     w1 = pd.Timestamp(cfg["window_end"]) if cfg.get("window_end") else None
     cut = cfg["cutoffs"]
     rules = cfg["cell_rules"]
-    sectors = _sector_map()
+    sectors = _sector_map()      # 화면 섹터 (LLV 정본)
+    agg = _agg_map(cfg)          # 화면 → 분류 섹터
     names = _name_map()
 
     panel = pd.concat([pd.read_parquet(CORE), pd.read_parquet(EXTEND)], ignore_index=True)
@@ -107,19 +126,23 @@ def compute(cfg: dict) -> dict:
         if not nm and "Name" in g.columns:
             nm_vals = g["Name"].dropna()
             nm = str(nm_vals.iloc[-1]) if len(nm_vals) else ""
+        _scr = sectors.get(tkr)
         recs[tkr] = dict(
-            ticker=tkr, name=nm, sector=sectors.get(tkr),
+            ticker=tkr, name=nm, sector=_scr,
+            # ⚠ 섹터 성격 판정은 sector 가 아니라 **sector_cls** 로 한다.
+            #   화면 섹터를 그대로 쓰면 1~2종목 섹터에서 중앙값이 무의미해진다.
+            sector_cls=agg.get(_scr, _scr),
             r2=round(r2, 6), slope=round(slope, 8), bh=round(bh, 6), n=int(len(g)),
         )
 
     # 섹터 R² 중앙값
     sec_df = pd.DataFrame(recs).T
-    sec_med = sec_df.groupby("sector")["r2"].median().to_dict()
+    sec_med = sec_df.groupby("sector_cls")["r2"].median().to_dict()
 
     # 2차: 셀 배정
     for tkr, r in recs.items():
         r2 = r["r2"]; slope = r["slope"]
-        smed = float(sec_med.get(r["sector"], np.nan))
+        smed = float(sec_med.get(r["sector_cls"], np.nan))
         r["sector_med_r2"] = round(smed, 6)
         # 종목성격
         if r2 >= cut["stock_trend_r2"] and slope > 0:
