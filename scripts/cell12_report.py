@@ -91,6 +91,16 @@ def build(panel: dict[str, pd.DataFrame]) -> dict:
     yz = wide(panel, "YZ_60", idx, cols).astype(float)
     rsi = wide(panel, "RSI", idx, cols).astype(float)
 
+    # ⚠ BM 자신을 **표본에서 뺀다** (시계열은 따로 챙겨 둔다).
+    #   ① 자기 대비 초과수익은 정의상 정확히 0 이라 셀 통계를 0 쪽으로 끌어당기고,
+    #   ② 102110 은 지수 ETF 라 3.3년 내내 YZ低 에 상주해 편향이 한쪽 셀에 몰린다.
+    #   ③ 高/低 분할의 '그날 전 종목 중앙값' 도 지수가 섞이면 살짝 밀린다.
+    #   그래서 지표·분할을 계산하기 **전에** 뺀다.
+    if BM not in close.columns:
+        raise SystemExit(f"❌ BM {BM} 이 패널에 없다 — 초과수익률을 낼 수 없다")
+    bm = close[BM].copy()
+    close, yz, rsi = (t.drop(columns=[BM]) for t in (close, yz, rsi))
+
     # 롤링 R²: corr(t, log C)². 단순회귀에서 R² = corr² 라 회귀를 풀 필요가 없다.
     y = np.log(close).replace([np.inf, -np.inf], np.nan)
     x = pd.Series(np.arange(len(y), dtype=float), index=y.index)
@@ -112,15 +122,31 @@ def build(panel: dict[str, pd.DataFrame]) -> dict:
         index=r2.index, columns=r2.columns)
     cell = (quad + "·" + rsi3).where(r2.notna() & yz.notna() & rsi.notna())
 
-    # BM 대비 초과 선행수익률
-    if BM not in close.columns:
-        raise SystemExit(f"❌ BM {BM} 이 패널에 없다 — 초과수익률을 낼 수 없다")
-    bm = close[BM]
-    fwd = {}
-    for n in FWD:
-        fwd[n] = (close.shift(-n) / close - 1.0).sub(bm.shift(-n) / bm - 1.0, axis=0)
+    # BM 대비 초과 선행수익률 (BM 은 이미 표본에서 빠져 있고, 시계열만 쓴다)
+    fwd = {n: (close.shift(-n) / close - 1.0).sub(bm.shift(-n) / bm - 1.0, axis=0)
+           for n in FWD}
 
-    return dict(cell=cell, r2=r2, yz=yz, rsi=rsi, slope=slope, past60=past60, fwd=fwd)
+    names = {t: (str(d["Name"].dropna().iloc[-1]) if "Name" in d.columns
+                 and d["Name"].notna().any() else t)
+             for t, d in panel.items()}
+    return dict(cell=cell, r2=r2, yz=yz, rsi=rsi, slope=slope, past60=past60,
+                fwd=fwd, names=names)
+
+
+def persistent_axis(d: dict, axis: str) -> tuple[list[str], list[str]]:
+    """어느 축에서 **한쪽에만 상주한** 종목. R²·RSI 는 전 종목이 오가지만
+    YZ 는 그렇지 않다 — 이 함수가 그 차이를 드러낸다."""
+    cell, names = d["cell"], d["names"]
+    valid = cell.notna()
+    hi = (valid & cell.apply(lambda s: s.str.contains(f"{axis}高", regex=False))
+          ).fillna(False)
+    lo = (valid & cell.apply(lambda s: s.str.contains(f"{axis}低", regex=False))
+          ).fillna(False)
+    seen = set(cell.columns[valid.any()])
+    H, L = set(cell.columns[hi.any()]), set(cell.columns[lo.any()])
+    med = d["yz" if axis == "YZ" else "r2"].median()
+    key = lambda S: [names.get(t, t) for t in sorted(S, key=lambda x: -med.get(x, 0))]
+    return key(seen - L), key(seen - H)
 
 
 # ─────────────────────────── 집계 ───────────────────────────
@@ -146,6 +172,52 @@ def compose(d: dict) -> pd.DataFrame:
             "23-24": era["23-24"], "25-26": era["25-26"],
         })
     return pd.DataFrame(rows)
+
+
+def compose_margin(d: dict) -> tuple[pd.DataFrame, list[int]]:
+    """12셀을 각 축으로 접은 **주변합**. 축 하나씩 무시하면 무엇이 남는지 본다.
+
+    반환 (표, 묶음크기) — 묶음크기는 엑셀에서 구분선을 그을 단위다.
+    ⚠ 비중은 전체 대비다. 같은 축끼리 더하면 100% 가 된다(R²高+R²低=1).
+    """
+    cell = d["cell"]
+    tot = int(cell.notna().sum().sum())
+    valid = cell.notna()
+    # (라벨, 마스크) — 마스크는 셀 이름의 부분일치로 만든다.
+    groups: list[tuple[str, pd.DataFrame]] = [("[전체 기준선]", valid)]
+    sizes = [1]
+    for names, size in [
+        (["R²高", "R²低"], 2),
+        (["YZ高", "YZ低"], 2),
+        (["과매도", "중간", "과매수"], 3),
+        (QUAD, 4),
+    ]:
+        for nm in names:
+            if nm in ("과매도", "중간", "과매수"):        # RSI 축은 **마지막 마디**로 판정
+                m = valid & cell.apply(lambda s: s.str.rsplit("·", n=1).str[-1] == nm)
+            elif nm in QUAD:                              # 사분면은 앞 두 마디
+                m = valid & cell.apply(lambda s: s.str.rsplit("·", n=1).str[0] == nm)
+            else:                                         # 단일 축은 포함 여부
+                m = valid & cell.apply(lambda s: s.str.contains(nm, regex=False))
+            groups.append((nm, m.fillna(False)))
+        sizes.append(size)
+
+    rows = []
+    for label, m in groups:
+        n = int(m.sum().sum())
+        st = lambda f: d[f].where(m).stack()
+        era = {k: int((cell.loc[a:b].notna() & m.loc[a:b]).sum().sum())
+               for k, (a, b) in ERAS.items()}
+        rows.append({
+            "셀": label, "건수": n, "비중": n / tot,
+            "종목수": int(m.any(axis=0).sum()),
+            "R²": st("r2").median(), "YZ_60": st("yz").median(),
+            "RSI": st("rsi").median(), "기울기": st("slope").median(),
+            "상승비율": float((st("slope") > 0).mean()),
+            "과거60일": st("past60").median(),
+            "23-24": era["23-24"], "25-26": era["25-26"],
+        })
+    return pd.DataFrame(rows), sizes
 
 
 def returns(d: dict, stat: str, era: tuple[str, str] | None = None) -> pd.DataFrame:
@@ -180,9 +252,70 @@ def returns(d: dict, stat: str, era: tuple[str, str] | None = None) -> pd.DataFr
     return df
 
 
+def build_facts(d: dict, comp: pd.DataFrame, tables: dict) -> dict:
+    """해설에 쓸 숫자를 **표에서 뽑는다.** 손으로 박으면 재실행 때 조용히 어긋난다."""
+    med = tables["수익률_중앙값"][0].set_index("셀")
+    mean = tables["수익률_평균"][0].set_index("셀")
+    Δ = lambda t, c, n=20: t.loc[c, f"Δ{n}일"]
+
+    def group(pred):
+        return [c for c in CELLS if pred(c)]
+
+    def band(cells, n=20):
+        a = [Δ(med, c, n) for c in cells]; b = [Δ(mean, c, n) for c in cells]
+        return (f"Δ중앙 {min(a):+.1%}p~{max(a):+.1%}p".replace("%p", "%p"),
+                f"Δ평균 {min(b):+.1%}p~{max(b):+.1%}p")
+
+    oversold = group(lambda c: c.endswith("과매도"))
+    lowvol_ob = group(lambda c: "YZ低" in c and c.endswith("과매수"))
+    best = max(oversold, key=lambda c: Δ(med, c))
+    # 두 통계의 부호가 같은 셀만 소견으로 채택한다.
+    agree = lambda cs: all(np.sign(Δ(med, c)) == np.sign(Δ(mean, c)) for c in cs)
+
+    verdict = []
+    if agree(oversold) and Δ(med, oversold[0]) > 0:
+        lo, hi = band(oversold)
+        verdict += [
+            f"◎ 과매도 4셀 전부 양(+) : {lo} / {hi}. 네 셀 모두, 거의 모든 창에서 양수다.",
+            f"   가장 강한 것은 **{best}**(Δ중앙 {Δ(med,best):+.1%}p, "
+            f"Δ평균 {Δ(mean,best):+.1%}p) — 곧게 내리던 고변동 종목의 반등이다. "
+            f"다만 {comp.loc[comp['셀']==best,'건수'].iloc[0]:,.0f}건뿐이다.",
+        ]
+    if agree(lowvol_ob) and Δ(med, lowvol_ob[0]) < 0:
+        verdict += [
+            "◎ YZ低·과매수 2셀 전부 음(−) : "
+            + " / ".join(f"{c.split('·')[0]} Δ중앙 {Δ(med,c):+.1%}p" for c in lowvol_ob)
+            + " 이고 **창이 길어질수록 나빠진다**"
+            + f"(120일 {' / '.join(f'{Δ(med,c,120):+.1%}p' for c in lowvol_ob)}).",
+            "   변동성이 낮은데 RSI 가 과열이면 더 갈 힘이 없다는 뜻. "
+            "회피·블랙리스트 후보로 가장 명확한 신호다.",
+        ]
+    c = "R²低·YZ高·중간"
+    verdict.append(
+        f"○ {c} : Δ가 양쪽 다 양수이고 창이 길수록 커진다"
+        f"(20일 {Δ(med,c):+.1%}/{Δ(mean,c):+.1%}p → "
+        f"120일 {Δ(med,c,120):+.1%}/{Δ(mean,c,120):+.1%}p). "
+        f"표본도 {comp.loc[comp['셀']==c,'건수'].iloc[0]:,.0f}건으로 크다.")
+    ob_hv = group(lambda c: "YZ高" in c and c.endswith("과매수"))
+    verdict.append(
+        f"△ YZ高·과매수 : 평균만 크게 양수"
+        f"({' / '.join(f'{Δ(mean,c):+.1%}p' for c in ob_hv)}), "
+        f"중앙값은 ≈0({' / '.join(f'{Δ(med,c):+.1%}p' for c in ob_hv)}). "
+        "위 한계 2 참조 — 아직 규칙으로 쓰지 말 것.")
+
+    return {
+        "n_tickers": int(d["cell"].shape[1]),
+        "base_med20": med.loc["[전체 기준선]", "20일"],
+        "base_mean20": mean.loc["[전체 기준선]", "20일"],
+        "yz_persistent": persistent_axis(d, "YZ"),
+        "verdict": verdict,
+    }
+
+
 # ─────────────────────────── 엑셀 ───────────────────────────
-def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
-               meta: dict) -> None:
+def write_xlsx(out: Path, comp: pd.DataFrame, margin: pd.DataFrame,
+               margin_groups: list[int], tables: dict[str, pd.DataFrame],
+               facts: dict, meta: dict) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -202,17 +335,26 @@ def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
             c.border = Border(bottom=med, left=thin, right=thin)
         ws.row_dimensions[row].height = 30
 
-    def put_table(ws, df, r0, fmt, signed=frozenset(), widths=None, sep=None):
+    def put_table(ws, df, r0, fmt, signed=frozenset(), widths=None, sep=None,
+                  groups=None):
         """df 를 (r0, 1) 부터 쓴다. fmt = {열: number_format}.
-        sep = 왼쪽에 굵은 구분선을 그을 열 이름 (블록 경계 표시용)."""
+        sep    = 왼쪽에 굵은 구분선을 그을 열 이름 (블록 경계 표시용).
+        groups = 행 묶음 크기 리스트 (기본 3행씩 = RSI 3구분). 묶음마다 줄무늬·구분선."""
         for j, col in enumerate(df.columns, 1):
             ws.cell(row=r0, column=j, value=col)
         style_header(ws, r0, len(df.columns))
         sep_j = (list(df.columns).index(sep) + 1) if sep in list(df.columns) else None
+        sizes = list(groups) if groups else [3] * ((len(df) + 2) // 3)
+        gidx, glast = [], []            # 행 → (묶음번호, 묶음의 마지막인가)
+        for gi, sz in enumerate(sizes):
+            gidx += [gi] * sz
+            glast += [False] * (sz - 1) + [True]
+        gidx += [len(sizes)] * (len(df) - len(gidx))       # 남는 행(기준선 등)
+        glast += [True] * (len(df) - len(glast))
         for i, (_, rec) in enumerate(df.iterrows()):
             r = r0 + 1 + i
             is_base = str(rec.iloc[0]).startswith("[")     # 기준선 행
-            grp = i // 3                                   # 3행(RSI 3구분)씩 묶어 줄무늬
+            grp = gidx[i]
             for j, col in enumerate(df.columns, 1):
                 v = rec[col]
                 c = ws.cell(row=r, column=j,
@@ -228,7 +370,7 @@ def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
                 c.alignment = Alignment(horizontal="left" if j == 1 else "right")
                 c.border = Border(left=(med if j == sep_j else thin), right=thin,
                                   top=(med if is_base else None),
-                                  bottom=(med if (is_base or (i + 1) % 3 == 0) else thin))
+                                  bottom=(med if (is_base or glast[i]) else thin))
                 if is_base:
                     c.fill = PatternFill("solid", fgColor="FFFFF9C4")   # 기준선 강조
                 elif grp % 2 == 1:
@@ -275,18 +417,19 @@ def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
         ]),
         ("★ 0 이 아니라 [전체 기준선] 과 비교할 것 — 이 표에서 가장 중요한 주의", [
             "수익률 시트의 노란 [전체 기준선] 행은 12셀을 합친 전체 관측의 값이다. "
-            "20일 중앙값이 **−1.33%** 다.",
+            f"20일 중앙값이 **{facts['base_med20']:+.2%}** 다.",
             "즉 이 기간에는 **중앙 종목이 원래 BM 에 진다.** 2023~2026 의 코스피200 이 "
             "반도체 대형주에 끌려 강했고 시가총액 가중이기 때문이다",
-            "(평균으로 재면 기준선이 +0.12% 로 거의 0 인 것이 같은 사실의 뒷면이다 — "
-            "평균 종목 ≈ BM, 중앙 종목 < BM).",
+            f"(평균으로 재면 기준선이 {facts['base_mean20']:+.2%} 로 거의 0 인 것이 "
+            "같은 사실의 뒷면이다 — 평균 종목 ≈ BM, 중앙 종목 < BM).",
             "그래서 셀의 절대 수치가 음수인 것은 대개 셀의 성질이 아니라 기준선의 위치다. "
             "**신호는 오른쪽 Δ 블록의 부호**로 읽는다.",
             "실제로 기준선을 빼고 나니 평균과 중앙값의 모순이 대부분 사라졌다 — "
             "종전의 '11/12 셀이 음수' 는 셀의 문제가 아니었다.",
         ]),
         ("⚠ 그래도 남는 한계 (전부 실측에서 드러난 것)", [
-            "1. 생존편향 — 지금 살아 있는 207종목의 과거다. 망해서 사라진 종목이 "
+            f"1. 생존편향 — 지금 살아 있는 {facts['n_tickers']}종목의 과거다"
+            f"(패널 {facts['n_tickers'] + 1}종목에서 BM 제외). 망해서 사라진 종목이 "
             "표본에 없으므로 전 셀이 낙관적이다. 기준선도 같이 낙관적이라",
             "   Δ 로 보면 상당 부분 상쇄되지만, 고모멘텀 종목이 사라진 편향은 "
             "과매수 셀에 특히 유리하게 남는다.",
@@ -300,20 +443,7 @@ def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
             "5. 상대 분할 — 高/低는 그날 전 종목 중앙값 기준이라 셀 크기는 항상 대략 "
             "1/4씩이다. '절대적으로 높다' 가 아니다.",
         ]),
-        ("소견 — 평균·중앙값이 **둘 다** 같은 부호인 것만 (Δ 기준, 20일)", [
-            "◎ 과매도 4셀 전부 양(+) : Δ중앙 +1.9 ~ +3.3%p / Δ평균 +1.7 ~ +5.1%p. "
-            "네 셀 모두, 거의 모든 창에서 양수다.",
-            "   가장 강한 것은 **R²高·YZ高·과매도**(Δ중앙 +3.3%p, Δ평균 +5.1%p) — "
-            "곧게 내리던 고변동 종목의 반등이다. 다만 1,060건뿐이다.",
-            "◎ YZ低·과매수 2셀 전부 음(−) : R²高 Δ중앙 −1.3%p / R²低 −2.2%p 이고 "
-            "**창이 길어질수록 나빠진다**(120일 −6.2 / −11.5%p).",
-            "   변동성이 낮은데 RSI 가 과열이면 더 갈 힘이 없다는 뜻. "
-            "회피·블랙리스트 후보로 가장 명확한 신호다.",
-            "○ R²低·YZ高·중간 : Δ가 양쪽 다 양수이고 창이 길수록 커진다"
-            "(20일 +0.1/+1.5%p → 120일 +1.6/+8.3%p). 표본도 35,616건으로 크다.",
-            "△ YZ高·과매수 : 평균만 크게 양수, 중앙값은 ≈0. 위 한계 2 참조 — "
-            "아직 규칙으로 쓰지 말 것.",
-        ]),
+        ("소견 — 평균·중앙값이 **둘 다** 같은 부호인 것만 (Δ 기준, 20일)", facts["verdict"]),
         ("색 규약", [
             "양수 빨강(#EF5350) / 음수 파랑(#1976D2) — Kane 전역 지침. 숫자는 우측 정렬.",
         ]),
@@ -337,19 +467,93 @@ def write_xlsx(out: Path, comp: pd.DataFrame, tables: dict[str, pd.DataFrame],
         signed={"기울기", "과거60일"},
         widths=[20, 10, 8, 9, 8, 9, 7, 11, 10, 11, 10, 10])
     ws.freeze_panes = ws.cell(row=r + 2, column=2)
+    # ⚠ 아래 해설의 숫자는 **표에서 계산해 쓴다.** 손으로 박으면 재실행 때
+    #   조용히 어긋난다 (실제로 두 번 어긋났다 — BM 제외 전후, 초판 대 재판).
+    q = lambda lbl, col: comp.loc[comp["셀"] == lbl, col].iloc[0]
+    rsi_share = {r: comp[comp["셀"].str.endswith("·" + r)]["비중"].sum() for r in RSI3}
+    od = comp[comp["셀"].str.endswith("·과매도")]["건수"]
+    flat = comp.loc[comp["과거60일"].abs().idxmin()]
     end += 1
     for ln in [
-        "읽기 — ① 표본이 치우쳐 있다: 중간 90.3% / 과매수 7.2% / 과매도 2.5%. "
-        "과매도 셀은 824~1,406건뿐이다.",
-        "② R²와 RSI가 이미 얽혀 있다: R²高·과매도의 '상승비율'이 2%, R²高·과매수가 98~99%. "
-        "R²가 높은 종목이 RSI 극단에 가면 방향이 사실상 정해진다 — "
-        "'방향' 축을 따로 둘 실익이 R²高 쪽에는 없다.",
-        "③ 과거60일 수익률이 12셀을 −31.7% ~ +75.6% 로 거의 단조 정렬한다. "
+        f"읽기 — ① 표본이 치우쳐 있다: 중간 {rsi_share['중간']:.1%} / "
+        f"과매수 {rsi_share['과매수']:.1%} / 과매도 {rsi_share['과매도']:.1%}. "
+        f"과매도 셀은 {od.min():,.0f}~{od.max():,.0f}건뿐이다.",
+        f"② R²와 RSI가 이미 얽혀 있다: R²高·과매도의 '상승비율'이 "
+        f"{min(q('R²高·YZ高·과매도','상승비율'), q('R²高·YZ低·과매도','상승비율')):.0%}, "
+        f"R²高·과매수가 "
+        f"{min(q('R²高·YZ高·과매수','상승비율'), q('R²高·YZ低·과매수','상승비율')):.0%}~"
+        f"{max(q('R²高·YZ高·과매수','상승비율'), q('R²高·YZ低·과매수','상승비율')):.0%}. "
+        "R²가 높은 종목이 RSI 극단에 가면 방향이 사실상 정해진다 —",
+        "   '방향' 축을 따로 둘 실익이 R²高 쪽에는 없다.",
+        f"③ 과거60일 수익률이 12셀을 {comp['과거60일'].min():.1%} ~ "
+        f"{comp['과거60일'].max():.1%} 로 거의 단조 정렬한다. "
         "YZ가 높을수록 양 끝이 더 벌어진다 — YZ가 진폭 배율 역할을 한다.",
-        "④ R²低·YZ低·중간(41,298건, 24.6%)이 유일한 '진짜 횡보'다. "
-        "과거60일 +0.4%, 기울기 ≈0, 상승 52%. 시장의 기본값이 여기다.",
-        "⑤ 종목수가 전부 116~191이다. 어느 종목이든 12셀을 돌아다닌다 — "
-        "셀은 고정 분류가 아니라 매일 다시 판정해야 하는 상태다.",
+        f"④ {flat['셀']}({flat['건수']:,.0f}건, {flat['비중']:.1%})이 유일한 '진짜 횡보'다. "
+        f"과거60일 {flat['과거60일']:+.1%}, 기울기 ≈0, 상승 {flat['상승비율']:.0%}. "
+        "시장의 기본값이 여기다.",
+        f"⑤ 종목수가 전부 {comp['종목수'].min():.0f}~{comp['종목수'].max():.0f}이다. "
+        "어느 종목이든 12셀을 돌아다닌다 — "
+        "셀은 고정 분류가 아니라 매일 다시 판정해야 하는 상태다(단, YZ축은 예외 — ⑩).",
+    ]:
+        end = note(ws, end, ln, size=9)
+
+    # ② 주변합 — 12셀을 각 축으로 접은 표
+    end += 1
+    end = note(ws, end, "② 주변합 — 12셀을 축 하나씩으로 접었을 때", bold=True, size=13)
+    end = note(ws, end, "축 안에서 더하면 전체가 된다 (R²高 + R²低 = 100%). "
+                        "12셀 표와 나란히 놓고 '이 특성이 어느 축에서 오는가'를 본다.",
+               size=9, color="FF757575")
+    end = put_table(
+        ws, margin, end + 1,
+        fmt={"건수": "#,##0", "비중": "0.0%", "종목수": "#,##0", "R²": "0.000",
+             "YZ_60": "0.000", "RSI": "0", "기울기": "0.00000", "상승비율": "0%",
+             "과거60일": "0.0%", "23-24": "#,##0", "25-26": "#,##0"},
+        signed={"기울기", "과거60일"}, groups=margin_groups,
+        widths=[20, 10, 8, 9, 8, 9, 7, 11, 10, 11, 10, 10])
+    g = lambda lbl, col: margin.loc[margin["셀"] == lbl, col].iloc[0]
+    spread = lambda a, b, col: abs(g(a, col) - g(b, col))
+    hi_names, lo_names = facts["yz_persistent"]
+    quad = margin[margin["셀"].isin(QUAD)]
+    end += 1
+    for ln in [
+        "읽기 — ⑥ 세 축이 **방향을 가르는 힘**이 서로 다르다. "
+        "상승비율(기울기 b>0 비율)로 재면:",
+        f"      RSI축  과매도 {g('과매도','상승비율'):.0%} / 중간 {g('중간','상승비율'):.0%} / "
+        f"과매수 {g('과매수','상승비율'):.0%}   ← 압도적 1위 "
+        f"({spread('과매수','과매도','상승비율'):.0%}p 폭)",
+        f"      YZ축   YZ高 {g('YZ高','상승비율'):.0%} / YZ低 {g('YZ低','상승비율'):.0%}"
+        f"                  ← 2위 ({spread('YZ高','YZ低','상승비율')*100:.1f}%p)",
+        f"      R²축   R²高 {g('R²高','상승비율'):.0%} / R²低 {g('R²低','상승비율'):.0%}"
+        f"                  ← 거의 안 가른다 ({spread('R²高','R²低','상승비율')*100:.1f}%p)",
+        "⑦ ⚠ **YZ 가 방향을 가르는 건 예상 밖인데, 원인은 변동성이 아니라 종목 구성이다** "
+        "(⑩ 참조). YZ 는 부호 없는 진폭 지표라 원래 방향과 무관해야 한다.",
+        f"   그런데 YZ高 의 과거60일이 {g('YZ高','과거60일'):+.1%}, "
+        f"YZ低 가 {g('YZ低','과거60일'):+.1%} 다. YZ高 에 상주하는 것이 바이오·반도체 "
+        "중소형 성장주이고 YZ低 에 상주하는 것이 금융·통신·유틸리티라,",
+        "   2023~2026 강세장에서 전자가 오른 결과가 'YZ 가 방향을 가른다' 처럼 보이는 것이다. "
+        "**섹터·스타일 효과이지 변동성 효과가 아니다.**",
+        "   → **YZ 를 방향 신호로 쓰지 말 것.** 진폭 축으로만 쓴다.",
+        f"⑧ R²축은 방향은 못 가르지만 **크기**를 가른다: 기울기 중앙 "
+        f"R²高 {g('R²高','기울기'):+.5f} / R²低 {g('R²低','기울기'):+.5f} "
+        f"({g('R²高','기울기')/g('R²低','기울기'):.0f}배), "
+        f"과거60일 {g('R²高','과거60일'):+.1%} / {g('R²低','과거60일'):+.1%}.",
+        "   즉 R² 가 높다는 건 '오른다'가 아니라 '**한 방향으로 크게 간다**'는 뜻이다 — "
+        "방향은 RSI 가, 진폭은 YZ 가, 크기·순도는 R² 가 담당한다. 세 축이 겹치지 않는다.",
+        f"⑨ 사분면 4개는 건수가 {quad['비중'].min():.1%}~{quad['비중'].max():.1%} 로 고르다. "
+        "상대 분할이라 당연하지만, 덕분에 사분면 간 비교는 표본 크기 차이를 "
+        "걱정하지 않아도 된다.",
+        "⑩ ★ **YZ 는 상태가 아니라 종목의 속성이다 — 이게 R²·RSI 와 결정적으로 다르다.**",
+        f"   종목수를 보면 R²축은 高·低 모두 **{g('R²高','종목수'):.0f}**"
+        "(전 종목이 양쪽을 오간다)인데 "
+        f"YZ축은 **{g('YZ高','종목수'):.0f} / {g('YZ低','종목수'):.0f}** 다. 즉",
+        f"   **{len(hi_names)}종목은 3.3년 내내 YZ高, {len(lo_names)}종목은 내내 YZ低** 였다. "
+        "한 번도 반대편에 간 적이 없다.",
+        "      항상 高 — " + " · ".join(hi_names),
+        "      항상 低 — " + " · ".join(lo_names),
+        "   전자는 바이오·반도체 중소형 성장주, 후자는 금융·통신·유틸리티·필수소비재다. "
+        "**YZ 분할은 사실상 스타일 분할**이고, ⑦ 의 방향성이 여기서 나온다.",
+        f"   ※ BM({BM}) 자신은 표본에서 제외했다 — 자기 대비 초과수익이 정의상 0 이고, "
+        "지수 ETF 라 내내 YZ低 에 상주해 편향이 한쪽에 몰리기 때문.",
     ]:
         end = note(ws, end, ln, size=9)
 
@@ -393,6 +597,7 @@ def main() -> int:
     d = build(panel)
     print("· 집계")
     comp = compose(d)
+    margin, margin_groups = compose_margin(d)
     tables = {
         "수익률_중앙값": (returns(d, "median"), "전 기간 · 중앙값 — **먼저 볼 표**"),
         "수익률_평균": (returns(d, "mean"),
@@ -400,8 +605,9 @@ def main() -> int:
         "시대별_23-24_중앙": (returns(d, "median", ERAS["23-24"]), "2023-01 ~ 2024-12 · 중앙값"),
         "시대별_25-26_중앙": (returns(d, "median", ERAS["25-26"]), "2025-01 ~ 2026-12 · 중앙값"),
     }
+    facts = build_facts(d, comp, tables)
     print(f"· 엑셀 작성 → {args.out}")
-    write_xlsx(args.out, comp, tables, {
+    write_xlsx(args.out, comp, margin, margin_groups, tables, facts, {
         "generated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M KST"),
         "source": "MagicFormula/scripts/cell12_report.py  (원자료: LLV core+extend parquet)",
     })

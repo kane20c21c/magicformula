@@ -97,3 +97,6 @@ output/redesign_pos52_panel.parquet
 # Claude 설정 — 공유 deny 규칙만 추적, 로컬 설정은 제외
 .claude/*
 !.claude/settings.json
+
+# Excel 잠금 파일 (파일을 연 채로 재생성하면 생긴다)
+~$*
