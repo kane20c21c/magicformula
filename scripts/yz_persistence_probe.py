@@ -173,6 +173,65 @@ def stability(P: dict[str, pd.DataFrame], valid: pd.DataFrame) -> dict:
             "n_days": int(valid.any(axis=1).sum()), "lags": LAGS}
 
 
+# ─────────── Part 1-b — 창 길이 스윕 (케인 3차 질문 2026-09-09) ───────────
+#
+# "YZ 는 60일 창인데, 창 크기를 바꾸면 안정성이 바뀌나?"
+#
+# ⚠ 정당한 의심이다. **롤링 창은 자기상관을 기계적으로 만든다** — 60일 창이면
+#   어제와 오늘이 데이터의 59/60 를 공유한다. 창이 길수록 안정적으로 *보인다*.
+#   실제로 ICC 는 창에 따라 크게 움직인다(YZ 0.52@10일 → 0.74@120일).
+#
+# 그래서 **중첩이 0 인 잣대**로 다시 잰다 — 서로 겹치지 않는 n일 블록을 잡고,
+# 각 블록을 **그 블록의 데이터만으로** 계산해 인접 블록끼리 순위를 비교한다.
+# (롤링값의 블록 중앙값을 쓰면 블록 앞부분 창이 이전 블록을 물어 여전히 오염된다.)
+
+SWEEP_WINDOWS = [10, 20, 40, 60, 120]
+
+
+def _ohlc(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    piv = lambda c: (df.pivot_table(index="Date", columns="Ticker", values=c, aggfunc="last")
+                     .astype(float).drop(columns=[BM], errors="ignore"))
+    O, H, L, C = (piv(c) for c in ("Open", "High", "Low", "Close"))
+    o, cc = np.log(O / C.shift(1)), np.log(C / O)
+    u, dn = np.log(H / O), np.log(L / O)
+    return {"C": C, "o": o, "cc": cc, "rs": u * (u - cc) + dn * (dn - cc),
+            "lg": np.log(C).replace([np.inf, -np.inf], np.nan)}
+
+
+def disjoint_blocks(X: dict, n: int, min_cover=0.9) -> list[tuple[pd.Series, pd.Series]]:
+    """겹치지 않는 n일 블록마다 (YZ, R²) — **그 블록 데이터만** 쓴다 (중첩 0)."""
+    idx = X["C"].index[X["C"].notna().sum(axis=1) > 50]
+    k = 0.34 / (1.34 + (n + 1) / (n - 1))
+    out = []
+    for i in range(0, len(idx) - n + 1, n):
+        s = idx[i:i + n]
+        yz = np.sqrt(X["o"].loc[s].var(ddof=1) + k * X["cc"].loc[s].var(ddof=1)
+                     + (1 - k) * X["rs"].loc[s].mean())
+        r2 = X["lg"].loc[s].corrwith(pd.Series(np.arange(n, dtype=float), index=s)) ** 2
+        ok = X["C"].loc[s].notna().sum() >= n * min_cover     # 블록 내 결측 많은 종목 제외
+        out.append((yz.where(ok), r2.where(ok)))
+    return out
+
+
+def window_sweep(df: pd.DataFrame, windows=SWEEP_WINDOWS) -> pd.DataFrame:
+    rows = []
+    X = _ohlc(df)
+    for n in windows:
+        B = disjoint_blocks(X, n)
+        rec = {"창(거래일)": n, "블록 수": len(B)}
+        for j, ax in ((0, "YZ"), (1, "R²")):
+            for gap, lab in ((1, "다음 블록"), (2, "한 블록 건너")):
+                rs = []
+                for i in range(len(B) - gap):
+                    a, b = B[i][j], B[i + gap][j]
+                    m = a.notna() & b.notna()
+                    if m.sum() >= 30:
+                        rs.append(a[m].rank().corr(b[m].rank()))
+                rec[f"{ax} ρ({lab})"] = float(np.nanmean(rs)) if rs else np.nan
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
 # ─────────────── Part 2 — 횡단면 (참고. 답이 아니다) ───────────────
 def features(df: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     sys.path.insert(0, str(STOLAB / "longlivevault"))
@@ -278,6 +337,7 @@ def build(df: pd.DataFrame | None = None) -> dict:
     P, valid = axes(df)
     R = stability(P, valid)
     yz_hi = ((P["YZ_60"] >= 0.5) & valid).sum() / valid.sum()
+    R["sweep"] = window_sweep(df)
     f = features(df, list(yz_hi.index)).assign(yz_hi_ratio=yz_hi)
     R["cross"] = cross_section(f)
     R["names"] = {
