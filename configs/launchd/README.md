@@ -13,7 +13,7 @@ vault 와 동일한 launchd 방식으로 Magic Formula 데일리 시그널을 �
 
 - `com.stolab.magic-formula.daily-extended-signal.plist` — 평일 **16:35 + 20:45 KST 하루 2회** 확장(extend) 시그널 자동 실행 (시총 200 = core ∪ extend)
   - 코어 잡(16:30/20:40) **5분 뒤** 실행. universe="extended_all" 로 `daily_extended_signal_*.{json,md}` + `daily_extended_regimes_*.json` 산출. 코어 산출물은 덮어쓰지 않음.
-  - 전제: LLV kis_update(16:00/20:30) 가 extend.parquet 까지 적재한 뒤 실행되어야 정확한 Wyckoff 라벨.
+  - 전제: LLV kis_update(19:00/20:30) 가 extend.parquet 까지 적재한 뒤 실행되어야 정확한 Wyckoff 라벨.
 
 > **발열률 2개(`com.kane.fever-rule-{daily,mail}`, 16:30/17:00)는 이 파일 소관이
 > 아니다.** 2026-08-26 현물게이지(SpotGauge) 로 이관하며 plist 정본을
