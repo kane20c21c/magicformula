@@ -232,6 +232,100 @@ def window_sweep(df: pd.DataFrame, windows=SWEEP_WINDOWS) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# ─────── Part 1-c — 무엇을 재기에 안정적인가 (케인 4차 질문 2026-09-09) ───────
+#
+# YZ 는 세 성분의 합이고 **셋 다 2차 모멘트(분산·제곱)** 다:
+#     σ²_YZ = V_갭 + k·V_장중드리프트 + (1−k)·V_장중레인지
+# 2차 모멘트는 **부호가 없다** — ±5% 로 움직이면 오르든 내리든 같은 값이다.
+# 즉 YZ 가 재는 것은 방향이 아니라 **하루 움직임의 크기(scale)** 하나뿐이다.
+#
+# 이 절은 그 '크기' 가 왜 종목에 붙어 있는지를 **분해해서** 확인한다:
+#   ① YZ 세 성분이 각각 지속적인가 (한 채널의 특성인가, 아니면 전방위인가)
+#   ② YZ 식이 특별해서인가 (단순 종가변동성·평균 |수익률|·고저 레인지와 비교)
+#   ③ R² 는 왜 아닌가 — R² ≈ b²Var(x)/(b²Var(x)+σ²) 를 분자 |b| / 분모 σ 로 쪼갠다
+
+DECOMP_WINDOW = 60
+
+
+def decompose(df: pd.DataFrame, n: int = DECOMP_WINDOW) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """중첩 0 블록에서 성분별 지속성(인접·건너) + 성분 간 동시 상관."""
+    piv = lambda c: (df.pivot_table(index="Date", columns="Ticker", values=c, aggfunc="last")
+                     .astype(float).drop(columns=[BM], errors="ignore"))
+    O, H, L, C, MC = (piv(c) for c in ("Open", "High", "Low", "Close", "MarketCap"))
+    o, cc = np.log(O / C.shift(1)), np.log(C / O)
+    u, dn = np.log(H / O), np.log(L / O)
+    rs = u * (u - cc) + dn * (dn - cc)
+    ret, lg = np.log(C / C.shift(1)), np.log(C)
+    idx = C.index[C.notna().sum(axis=1) > 50]
+    k = 0.34 / (1.34 + (n + 1) / (n - 1))
+
+    B = []
+    for i in range(0, len(idx) - n + 1, n):
+        s = idx[i:i + n]
+        ok = C.loc[s].notna().sum() >= n * 0.9
+        Vo, Vc, Vrs = o.loc[s].var(ddof=1), cc.loc[s].var(ddof=1), rs.loc[s].mean()
+        y, xx = lg.loc[s], pd.Series(np.arange(n, dtype=float), index=s)
+        rr, sdy = y.corrwith(xx), y.std(ddof=1)
+        B.append({key: val.where(ok) for key, val in {
+            "YZ": np.sqrt(Vo + k * Vc + (1 - k) * Vrs),
+            "├ 갭 (overnight)": np.sqrt(Vo),
+            "├ 장중 드리프트 (O→C)": np.sqrt(Vc),
+            "└ 장중 레인지 (RS)": np.sqrt(Vrs.clip(0)),
+            "단순 종가변동성 (CC)": ret.loc[s].std(ddof=1),
+            "평균 |일간수익률|": ret.loc[s].abs().mean(),
+            "고저 레인지 (H−L)/C": ((H - L) / C).loc[s].mean(),
+            "시총": MC.loc[s].median(),
+            "R² (추세 순도)": rr ** 2,
+            "├ |기울기| b": (rr * sdy / xx.std(ddof=1)).abs(),
+            "└ 잔차 σ (추세 제거 후)": sdy * np.sqrt((1 - rr ** 2).clip(0)),
+        }.items()})
+
+    def rho(key, gap=1):
+        out = []
+        for i in range(len(B) - gap):
+            a, b = B[i][key], B[i + gap][key]
+            m = a.notna() & b.notna()
+            if m.sum() >= 30:
+                out.append(a[m].rank().corr(b[m].rank()))
+        return float(np.nanmean(out)) if out else np.nan
+
+    def xcorr(a, b):
+        out = []
+        for blk in B:
+            p, q = blk[a], blk[b]
+            m = p.notna() & q.notna()
+            if m.sum() >= 30:
+                out.append(p[m].rank().corr(q[m].rank()))
+        return float(np.nanmean(out)) if out else np.nan
+
+    keys = list(B[0])
+    persist = pd.DataFrame([{"지표": key, "ρ(다음 블록)": rho(key), "ρ(한 블록 건너)": rho(key, 2)}
+                            for key in keys])
+    pairs = [("YZ", "단순 종가변동성 (CC)"), ("YZ", "평균 |일간수익률|"),
+             ("YZ", "고저 레인지 (H−L)/C"), ("YZ", "└ 잔차 σ (추세 제거 후)"), ("YZ", "시총"),
+             ("R² (추세 순도)", "├ |기울기| b"), ("R² (추세 순도)", "└ 잔차 σ (추세 제거 후)")]
+    cross = pd.DataFrame([{"쌍": f"{a} × {b}", "ρ": xcorr(a, b)} for a, b in pairs])
+    return persist, cross
+
+
+def level_vs_rank(df: pd.DataFrame) -> dict:
+    """절대 수준은 시장 따라 크게 움직이는데 순위는 유지되는가 — 둘을 갈라 본다."""
+    yz = (df.pivot_table(index="Date", columns="Ticker", values="YZ_60", aggfunc="last")
+          .astype(float).drop(columns=[BM], errors="ignore"))
+    mkt = yz.median(axis=1).dropna()
+    pr = yz.rank(axis=1, pct=True)
+    lo, hi = mkt.idxmin(), mkt.idxmax()
+    a, b = pr.loc[lo].dropna(), pr.loc[hi].dropna()
+    ok = a.index.intersection(b.index)
+    e1, e2 = pr.loc[:"2024-12-31"].median(), pr.loc["2025-01-01":].median()
+    m = e1.notna() & e2.notna()
+    return {"mkt_min": float(mkt.min()), "mkt_max": float(mkt.max()),
+            "mkt_min_at": mkt.idxmin(), "mkt_max_at": mkt.idxmax(),
+            "mkt_ratio": float(mkt.max() / mkt.min()),
+            "rho_extremes": float(a[ok].rank().corr(b[ok].rank())), "n_extremes": len(ok),
+            "rho_era": float(e1[m].rank().corr(e2[m].rank()))}
+
+
 # ─────────────── Part 2 — 횡단면 (참고. 답이 아니다) ───────────────
 def features(df: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     sys.path.insert(0, str(STOLAB / "longlivevault"))
@@ -338,6 +432,8 @@ def build(df: pd.DataFrame | None = None) -> dict:
     R = stability(P, valid)
     yz_hi = ((P["YZ_60"] >= 0.5) & valid).sum() / valid.sum()
     R["sweep"] = window_sweep(df)
+    R["decomp"], R["decomp_cross"] = decompose(df)
+    R["level"] = level_vs_rank(df)
     f = features(df, list(yz_hi.index)).assign(yz_hi_ratio=yz_hi)
     R["cross"] = cross_section(f)
     R["names"] = {
