@@ -58,8 +58,8 @@ UP, DOWN = "FFEF5350", "FF1976D2"   # Kane 전역 색 규약 (상승 빨강 / �
 
 
 # ─────────────────────────── 데이터 ───────────────────────────
-def load_panel() -> dict[str, pd.DataFrame]:
-    """LLV OHLCV 패널 → {티커: DataFrame(Date index)}."""
+def load_raw() -> pd.DataFrame:
+    """LLV OHLCV 정본 (core+extend) 를 긴 형태 그대로. 상주 검증도 이걸 쓴다."""
     sys.path.insert(0, str(STOLAB / "longlivevault"))
     vault = STOLAB / "longlivevault" / "data" / "ohlcv"
     parts = []
@@ -72,6 +72,12 @@ def load_panel() -> dict[str, pd.DataFrame]:
     df = pd.concat(parts, ignore_index=True)
     df["Date"] = pd.to_datetime(df["Date"])
     df["Ticker"] = df["Ticker"].astype(str).str.zfill(6)
+    return df
+
+
+def load_panel(raw: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
+    """LLV OHLCV 패널 → {티커: DataFrame(Date index)}."""
+    df = load_raw() if raw is None else raw
     return {t: g.sort_values("Date").set_index("Date") for t, g in df.groupby("Ticker")}
 
 
@@ -525,14 +531,16 @@ def write_xlsx(out: Path, comp: pd.DataFrame, margin: pd.DataFrame,
         f"                  ← 2위 ({spread('YZ高','YZ低','상승비율')*100:.1f}%p)",
         f"      R²축   R²高 {g('R²高','상승비율'):.0%} / R²低 {g('R²低','상승비율'):.0%}"
         f"                  ← 거의 안 가른다 ({spread('R²高','R²低','상승비율')*100:.1f}%p)",
-        "⑦ ⚠ **YZ 가 방향을 가르는 건 예상 밖인데, 원인은 변동성이 아니라 종목 구성이다** "
-        "(⑩ 참조). YZ 는 부호 없는 진폭 지표라 원래 방향과 무관해야 한다.",
+        "⑦ ⚠ **YZ 가 방향을 가르는 건 예상 밖이다** — YZ 는 부호 없는 진폭 지표라 원래 "
+        "방향과 무관해야 한다.",
         f"   그런데 YZ高 의 과거60일이 {g('YZ高','과거60일'):+.1%}, "
-        f"YZ低 가 {g('YZ低','과거60일'):+.1%} 다. YZ高 에 상주하는 것이 바이오·반도체 "
-        "중소형 성장주이고 YZ低 에 상주하는 것이 금융·통신·유틸리티라,",
-        "   2023~2026 강세장에서 전자가 오른 결과가 'YZ 가 방향을 가른다' 처럼 보이는 것이다. "
-        "**섹터·스타일 효과이지 변동성 효과가 아니다.**",
-        "   → **YZ 를 방향 신호로 쓰지 말 것.** 진폭 축으로만 쓴다.",
+        f"YZ低 가 {g('YZ低','과거60일'):+.1%} 다.",
+        "   ⚠⚠ **원인은 미규명이다.** 초판은 여기서 '섹터·스타일 효과' 라고 단정했는데 "
+        "근거가 종목명 훑기뿐이었고, 재검증(YZ상주_검증 시트)에서 **틀린 것으로 판명**됐다 —",
+        "   YZ 상주를 가르는 것은 섹터 하나가 아니라 회전율·규모·섹터가 함께다. "
+        "그중 무엇이 방향까지 만드는지는 **이 표로 판정할 수 없다.**",
+        "   → 원인이 무엇이든 **YZ 를 방향 신호로 쓰지 말 것.** 부호 없는 지표에서 나온 "
+        "방향성은 표본의 성질일 뿐 지표의 성질이 아니다. 진폭 축으로만 쓴다.",
         f"⑧ R²축은 방향은 못 가르지만 **크기**를 가른다: 기울기 중앙 "
         f"R²高 {g('R²高','기울기'):+.5f} / R²低 {g('R²低','기울기'):+.5f} "
         f"({g('R²高','기울기')/g('R²低','기울기'):.0f}배), "
@@ -550,8 +558,10 @@ def write_xlsx(out: Path, comp: pd.DataFrame, margin: pd.DataFrame,
         "한 번도 반대편에 간 적이 없다.",
         "      항상 高 — " + " · ".join(hi_names),
         "      항상 低 — " + " · ".join(lo_names),
-        "   전자는 바이오·반도체 중소형 성장주, 후자는 금융·통신·유틸리티·필수소비재다. "
-        "**YZ 분할은 사실상 스타일 분할**이고, ⑦ 의 방향성이 여기서 나온다.",
+        "   ⚠ **다만 '무엇의 속성인가' 는 이 명단으로 답할 수 없다** — 29종목으로 섹터 37개를 "
+        "가를 수 없고, 우리 유니버스는 테크 계열에 쏠려 있어 섹터와 규모가 교란된다.",
+        "   206종목 전부를 놓고 재검증한 결과는 **YZ상주_검증 시트**에 있다. "
+        "요약: 회전율 > 매출 > 영업이익 > 시총 > 업력 순이고, 섹터는 규모로 환원되지 않는다.",
         f"   ※ BM({BM}) 자신은 표본에서 제외했다 — 자기 대비 초과수익이 정의상 0 이고, "
         "지수 ETF 라 내내 YZ低 에 상주해 편향이 한쪽에 몰리기 때문.",
     ]:
@@ -581,6 +591,99 @@ def write_xlsx(out: Path, comp: pd.DataFrame, margin: pd.DataFrame,
         ]:
             end = note(ws, end, ln, size=9)
 
+    # ── 시트: YZ 상주 재검증 ────────────────────────────────
+    P = facts.get("probe")
+    if P:
+        ws = wb.create_sheet("YZ상주_검증")
+        ws.sheet_view.showGridLines = False
+        ws.column_dimensions["A"].width = 26
+        r = note(ws, 1, "YZ 상주는 무엇의 속성인가 — 재검증", bold=True, size=14)
+        r = note(ws, r, "생성기 scripts/yz_persistence_probe.py   ·   "
+                        f"{P['n_tickers']}종목 (BM 제외)", size=9, color="FF757575")
+        r += 1
+        for ln in [
+            "왜 다시 했나 (케인 지적 2026-09-08)",
+            "   초판 주석 ⑩ 은 '항상 高/低' 29종목의 **이름을 눈으로 훑고** "
+            "\"YZ 분할은 사실상 스타일(섹터) 분할\" 이라고 단정했다. 세 가지가 틀렸다 —",
+            "   ① 29종목으로 섹터 37개를 가를 수 없다(자유도 부족)  "
+            "② 업종만 보고 시총·매출·영업이익·업력을 안 봤다",
+            f"   ③ 유니버스가 테크 계열에 쏠려 있다({P['n_tech']}종목 {P['tech_share']:.1%}, "
+            f"유효섹터수 {P['eff_sectors']:.1f}/{P['n_sectors']}) — 섹터와 규모가 애초에 교란돼 있다",
+            "",
+            "그래서 어떻게 고쳤나",
+            "   종속변수를 **206종목 각각의 YZ高 비율**(0~1 연속)로 바꿨다. "
+            "29종목은 이 분포의 양 끝 꼬리로 자연히 포함된다.",
+            "   검정은 단독 설명력 → **교란 통제 후 증분** → 순열검정. "
+            "섹터는 수준이 37개라 우연히도 η² 가 커지므로 귀무분포로 판정한다.",
+            "",
+            "⚠ 교란의 크기 — 케인 지적이 옳았다는 증거",
+            "   섹터가 이미 설명하고 있는 분산 η²: "
+            + " · ".join(f"{k} {v:.3f}" for k, v in P["conf"].items()),
+            "   즉 섹터를 알면 시총·매출·회전율의 절반 이상이 따라온다. "
+            "**통제 없이 '섹터 때문' 이라 말할 수 없다.**",
+        ]:
+            r = note(ws, r, ln, size=9, bold=ln and not ln.startswith((" ", "　")))
+        r += 1
+
+        r = note(ws, r, "[A] 단독 설명력과 통제 후 — 연속변수는 스피어만 ρ, 범주형은 η²",
+                 bold=True, size=12)
+        sg = P["single"].copy()
+        for c in ("ρ", "ρ²", "η²", "순열 p", "회전율 통제 후 ρ", "시총 통제 후 ρ",
+                  "회전율 통제 후 η²", "시총 통제 후 η²"):
+            if c not in sg:
+                sg[c] = np.nan
+        sg = sg[["변수", "n", "ρ", "ρ²", "회전율 통제 후 ρ", "시총 통제 후 ρ",
+                 "η²", "회전율 통제 후 η²", "시총 통제 후 η²", "순열 p"]]
+        r = put_table(ws, sg, r + 1,
+                      fmt={"n": "#,##0", "순열 p": "0.0000",
+                           **{c: "0.000" for c in sg.columns if c not in ("변수", "n", "순열 p")}},
+                      signed={"ρ", "회전율 통제 후 ρ", "시총 통제 후 ρ"},
+                      groups=[7, 5], widths=[26, 7] + [11] * 8)
+        for ln in [
+            "읽기 — ⓐ 단일 최강은 **회전율**(ρ +0.774). 다만 거래량과 변동성은 정보 도착에 "
+            "함께 반응하므로 **설명이라기보다 재진술**에 가깝다. 그래서 아래에서 이걸 통제한다.",
+            "ⓑ 규모 축에서 **매출(−0.675)이 시총(−0.502)보다 강하다.** 시총에는 기대(밸류에이션)가 "
+            "섞여 있고 매출은 사업 규모 그 자체라, 사업이 작을수록 변동성이 크다는 쪽이 더 직접적이다.",
+            "ⓒ **영업이익률(−0.120)·주가 수준(−0.118)은 사실상 무관하다.** "
+            "'얼마나 잘 버느냐' 가 아니라 **'얼마나 크냐'** 가 가른다.",
+            "ⓓ 업력 −0.253 — 약하지만 있다. 다만 fundamentals 가 2010 시작이라 그 이전 상장이 "
+            "전부 한 점에 몰리는 **우측중도절단**이라 과소추정이다.",
+            "ⓔ 회전율을 통제해도 매출 −0.449, 섹터 η² 0.329(순열 p<0.001)가 남는다 — "
+            "**동어반복만은 아니다.**",
+        ]:
+            r = note(ws, r, ln, size=9)
+        r += 1
+
+        r = note(ws, r, "[B] 누적 설명력 (OLS R²)", bold=True, size=12)
+        r = put_table(ws, P["cum"], r + 1, fmt={"R²": "0.000", "n": "#,##0"},
+                      groups=[5, 3], widths=[26, 11, 8])
+        r += 1
+        r = note(ws, r, "[C] 최종 판정 — 규모를 전부 통제한 뒤에도 섹터가 남는가", bold=True, size=12)
+        for ln in [
+            f"   연속 4변수(회전율·시총·매출·업력) R² = **{P['r2_base']:.3f}**  →  "
+            f"섹터 더미 추가 R² = **{P['r2_full']:.3f}**   증분 **{P['inc']:+.3f}** (n={P['n_full']})",
+            f"   섹터 라벨을 1,000회 섞은 귀무분포: 중앙 {P['inc_null_med']:+.3f} · "
+            f"95%분위 {P['inc_null_p95']:+.3f}  →  **p = {P['inc_p']:.4f}**",
+            f"   반대 방향도 확인 — 시총 ρ 는 원자료 {P['rho_mcap_all']:+.3f} 에서 "
+            f"**섹터 내 편차만 쓰면 {P['within_sector_mcap_rho']:+.3f}** 로, 거의 그대로 남는다.",
+            "",
+            "   ⇒ **섹터와 규모는 서로를 대체하지 못한다. 둘 다 독립적으로 기여한다.**",
+            "     내 초판 문장 \"**사실상** 스타일 분할\" 은 이 점에서 **틀렸다** — "
+            "규모를 지운 자리에 섹터만 남는 구조가 아니다.",
+            "     동시에 \"섹터는 규모의 그림자일 뿐\" 이라는 반대편 주장도 성립하지 않는다.",
+            "",
+            f"   ⓕ 테크 쏠림은 착시의 주범이 **아니었다** — 테크 여부 단독 η² 0.186 → "
+            f"시총 통제 후 0.086 으로 반 이상이 규모였다.",
+            f"     다만 **규모 효과의 세기가 진영마다 다르다**: 시총 ρ 가 테크 {P['rho_tech']:+.3f} vs "
+            f"비테크 {P['rho_nontech']:+.3f} 로 두 배 차이다.",
+            "",
+            "⚠ 이 시트가 말하지 않는 것 — **인과가 아니다.** '무엇과 같이 움직이는가' 까지다. "
+            "그리고 ⑦ 의 '왜 방향까지 갈리는가' 는 여전히 **미규명**이다.",
+            "⚠ 재무는 종목별 최신 유효 연도의 DART 단면(매출 183 / 영업이익 168종목)이라 "
+            "결측이 무작위가 아닐 수 있다. 업력은 위 ⓓ 의 절단 문제를 안고 있다.",
+        ]:
+            r = note(ws, r, ln, size=9)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
 
@@ -591,7 +694,8 @@ def main() -> int:
     args = ap.parse_args()
 
     print("· 패널 로드")
-    panel = load_panel()
+    raw = load_raw()
+    panel = load_panel(raw)
     print(f"  {len(panel)}종목")
     print("· 지표·셀 계산")
     d = build(panel)
@@ -606,6 +710,14 @@ def main() -> int:
         "시대별_25-26_중앙": (returns(d, "median", ERAS["25-26"]), "2025-01 ~ 2026-12 · 중앙값"),
     }
     facts = build_facts(d, comp, tables)
+    # YZ 상주 재검증 (케인 지적 2026-09-08) — 실패해도 본 리포트는 나가게 한다.
+    try:
+        print("· YZ 상주 재검증")
+        sys.path.insert(0, str(HERE.parent))
+        import yz_persistence_probe as probe
+        facts["probe"] = probe.build(raw)[1]
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  ⚠ 건너뜀 — {type(e).__name__}: {e}")
     print(f"· 엑셀 작성 → {args.out}")
     write_xlsx(args.out, comp, margin, margin_groups, tables, facts, {
         "generated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M KST"),
