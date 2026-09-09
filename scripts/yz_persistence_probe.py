@@ -326,6 +326,88 @@ def level_vs_rank(df: pd.DataFrame) -> dict:
             "rho_era": float(e1[m].rank().corr(e2[m].rank()))}
 
 
+# ─────── Part 1-d — 왜 서열이 남는가 (케인 5차 질문 2026-09-10) ───────
+#
+# 케인의 추론: "수준은 불안정한데 서열은 안정적이라면, A·B 가 작아졌을 때
+#              C 도 작아졌을 확률이 매우 높다는 뜻이네."
+#
+# **정확한 추론이다.** 서열이 보존되려면 변동성이 종목마다 따로 움직이는 게 아니라
+# **다 같이, 비례적으로** 움직여야 한다. 검증 가능한 주장이므로 잰다:
+#   ① 종목 쌍 상관·제1주성분 — 공통 요인이 있는가
+#   ② 종목별 β (Δlog YZ_종목 = α + β·Δlog YZ_시장) — 방향이 같고 비례하는가
+#      로그에서 β≈1 이면 '평행 이동' = 수준은 통째로 변하고 서열은 보존
+#   ③ 종목별 R² — 공통분이 얼마이고 고유분(=서열을 갈아엎는 힘)이 얼마인가
+#
+# ⚠ 중첩 0 인 20일 블록 사이의 변화만 쓴다. 롤링값의 일간 차분을 쓰면 창이 겹쳐
+#   공통 요인이 과대 추정된다.
+
+COMOVE_WINDOW = 20
+DECAY_GAPS = 7
+
+
+def comovement(df: pd.DataFrame, n: int = COMOVE_WINDOW) -> dict:
+    piv = lambda c: (df.pivot_table(index="Date", columns="Ticker", values=c, aggfunc="last")
+                     .astype(float).drop(columns=[BM], errors="ignore"))
+    O, H, L, C = (piv(c) for c in ("Open", "High", "Low", "Close"))
+    o, cc = np.log(O / C.shift(1)), np.log(C / O)
+    u, dn = np.log(H / O), np.log(L / O)
+    rs = u * (u - cc) + dn * (dn - cc)
+    idx = C.index[C.notna().sum(axis=1) > 50]
+    k = 0.34 / (1.34 + (n + 1) / (n - 1))
+
+    rows = []
+    for i in range(0, len(idx) - n + 1, n):
+        s = idx[i:i + n]
+        ok = C.loc[s].notna().sum() >= n * 0.9
+        rows.append(np.sqrt(o.loc[s].var(ddof=1) + k * cc.loc[s].var(ddof=1)
+                            + (1 - k) * rs.loc[s].mean()).where(ok))
+    B = pd.DataFrame(rows).replace(0, np.nan)
+    # ⚠ log(0)·log(NaN) 이 ±inf 로 새면 SVD 가 수렴하지 않는다 (실제로 두 번 터졌다).
+    DL = np.log(B).replace([np.inf, -np.inf], np.nan).diff().iloc[1:]
+    DL = DL.loc[:, DL.notna().all()]
+    if DL.shape[1] < 30 or DL.shape[0] < 10:
+        return {}
+
+    cm = DL.corr().values
+    iu = np.triu_indices_from(cm, 1)
+    var = np.linalg.svd((DL - DL.mean()).values, compute_uv=False) ** 2
+    mkt = DL.mean(axis=1)
+    be = pd.DataFrame([(np.polyfit(mkt.values, DL[t].values, 1)[0],
+                        np.corrcoef(mkt.values, DL[t].values)[0, 1] ** 2)
+                       for t in DL.columns], columns=["beta", "R2"])
+    return {
+        "n_tickers": DL.shape[1], "n_periods": DL.shape[0],
+        "pair_mean": float(cm[iu].mean()), "pair_neg": float((cm[iu] < 0).mean()),
+        "pc1": float(var[0] / var.sum()), "pc2": float(var[1] / var.sum()),
+        "mkt_sd": float(mkt.std()), "mkt_max": float(mkt.max()), "mkt_min": float(mkt.min()),
+        "beta_med": float(be.beta.median()),
+        "beta_q1": float(be.beta.quantile(.25)), "beta_q3": float(be.beta.quantile(.75)),
+        "beta_p5": float(be.beta.quantile(.05)), "beta_p95": float(be.beta.quantile(.95)),
+        "beta_pos": float((be.beta > 0).mean()),
+        "beta_near1": float(be.beta.between(.5, 1.5).mean()),
+        "r2_med": float(be.R2.median()),
+    }
+
+
+def decay(df: pd.DataFrame, n: int = DECOMP_WINDOW, gaps: int = DECAY_GAPS) -> pd.DataFrame:
+    """서열이 얼마나 오래 가나 — 중첩 0 블록의 간격별 순위상관."""
+    X = _ohlc(df)
+    B = [b[0] for b in disjoint_blocks(X, n)]        # YZ 만
+    rows = []
+    for g in range(1, gaps + 1):
+        rs, pairs = [], 0
+        for i in range(len(B) - g):
+            a, b = B[i], B[i + g]
+            m = a.notna() & b.notna()
+            if m.sum() >= 30:
+                rs.append(a[m].rank().corr(b[m].rank()))
+                pairs += 1
+        if rs:
+            rows.append({"간격(거래일)": g * n, "≈개월": round(g * n / 20),
+                         "순위상관 ρ": float(np.nanmean(rs)), "블록쌍": pairs})
+    return pd.DataFrame(rows)
+
+
 # ─────────────── Part 2 — 횡단면 (참고. 답이 아니다) ───────────────
 def features(df: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     sys.path.insert(0, str(STOLAB / "longlivevault"))
@@ -434,6 +516,8 @@ def build(df: pd.DataFrame | None = None) -> dict:
     R["sweep"] = window_sweep(df)
     R["decomp"], R["decomp_cross"] = decompose(df)
     R["level"] = level_vs_rank(df)
+    R["comove"] = comovement(df)
+    R["decay"] = decay(df)
     f = features(df, list(yz_hi.index)).assign(yz_hi_ratio=yz_hi)
     R["cross"] = cross_section(f)
     R["names"] = {
