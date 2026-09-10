@@ -47,6 +47,7 @@ LABELS = G.LABELS
 UP, DOWN = "FFEF5350", "FF1976D2"
 MIN_Q_DAYS = 25          # 분기가 이보다 짧으면 그룹 판정에서 제외
 MIN_COVER = 0.5
+MIN_CELL_N = 5           # 셀-분기 표본이 이보다 적으면 그 분기는 제외
 
 
 def _binom_p(k: int, n: int) -> float:
@@ -156,7 +157,7 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
         return Cx.loc[s].apply(lambda c_: (c_.dropna().iloc[-1] / c_.dropna().iloc[0] - 1)
                                if c_.notna().sum() > 15 else np.nan)
 
-    rows, disp = [], []
+    rows, disp, marg = [], [], []
     for a, b in zip(qs, qs[1:]):
         s = C.index[C.index.to_period("Q") == a]
         if tail:
@@ -173,6 +174,10 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
         sig, ra, rb = sig[ok], ra[ok], rb[ok]
         gv, gr = _t3(sig, VOL3), _t3(ra, RET3)
         nxt, pct = _t3(rb, RET3), rb.rank(pct=True)
+        # 축별 주변합 — 균등 3분할이 실제로 지켜졌는지 검산용
+        marg.append({"분기": str(b), "전체": int(ok.sum()),
+                     **{f"V{c}": int((gv == c).sum()) for c in VOL3},
+                     **{f"R{c}": int((gr == c).sum()) for c in RET3}})
         for cv in VOL3:
             mv = gv == cv
             disp.append({"분기": str(b), "변동성": cv,
@@ -180,7 +185,9 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
                          "sd": float(rb[mv].std()), "시장sd": float(rb.std())})
             for cr in RET3:
                 m = mv & (gr == cr)
-                if m.sum() < 5:
+                # ⚠ 표본 5 미만 셀-분기는 뺀다. 실측 최소가 2종목까지 내려가는데
+                #   그런 분기의 비율은 잡음이라 평균을 흔든다 (저·상 이 1개 분기 빠진다).
+                if m.sum() < MIN_CELL_N:
                     continue
                 rows.append({"분기": str(b), "변동성": cv, "전분기 수익": cr,
                              "n": int(m.sum()),
@@ -188,13 +195,15 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
                              "중": float((nxt[m] == "중").mean()),
                              "하": float((nxt[m] == "하").mean()),
                              "순위백분위": float(pct[m].mean())})
-    D, E = pd.DataFrame(rows), pd.DataFrame(disp)
+    D, E, M = pd.DataFrame(rows), pd.DataFrame(disp), pd.DataFrame(marg)
 
     # ① 통합 9×3
     P = (D.groupby(["변동성", "전분기 수익"])
-         .agg(분기수=("n", "size"), 평균종목=("n", "mean"),
+         .agg(분기수=("n", "size"), n합계=("n", "sum"), n평균=("n", "mean"),
+              n최소=("n", "min"), n최대=("n", "max"),
               **{c: (c, "mean") for c in ("상", "중", "하")},
                순위백분위=("순위백분위", "mean")).reset_index())
+    P["전체 대비"] = P["n합계"] / P["n합계"].sum()
     # ② 셀별 부호검정
     sig_rows = []
     for cv in VOL3[::-1]:
@@ -229,8 +238,13 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
     w = int((hi[both] > lo[both]).sum())
     extra = {"n_q": len(both), "win": w, "p": _binom_p(w, len(both)),
              "ratio": float((hi[both] / lo[both]).median())}
-    return {"pooled": P, "sign": S, "disp": Dsp, "sd_test": extra,
-            "n_q": D["분기"].nunique(), "n_obs": len(D)}
+    # 축 비율 검산 — 균등 3분할이 실제로 지켜졌나
+    axis = {"전체 중앙": int(M["전체"].median()),
+            "전체 최소": int(M["전체"].min()), "전체 최대": int(M["전체"].max()),
+            "vol": {c: float((M[f"V{c}"] / M["전체"]).mean()) for c in VOL3},
+            "ret": {c: float((M[f"R{c}"] / M["전체"]).mean()) for c in RET3}}
+    return {"pooled": P, "sign": S, "disp": Dsp, "sd_test": extra, "axis": axis,
+            "n_q": D["분기"].nunique(), "n_obs": len(D), "n_total": int(P["n합계"].sum())}
 
 
 def write_xlsx(out: Path, runs: list[tuple[str, pd.DataFrame, dict]],
@@ -387,16 +401,39 @@ def write_xlsx(out: Path, runs: list[tuple[str, pd.DataFrame, dict]],
                         "변동성 축 하나만 보던 앞 검정에, 전분기 수익률을 함께 조건에 넣은 것"
                         "(=변동성으로 조건부한 모멘텀/반전)", size=9, color="FF757575")
         r += 1
+        ax = C9["axis"]
+        for ln in [
+            "분할은 **균등 3분할(1/3 : 1/3 : 1/3)** 이다 — 3:4:3 이 아니다. "
+            "두 축 모두 `rank(pct) ≤ 1/3, ≤ 2/3` 로 자른다.",
+            f"   실측 축 비율 — 변동성 저 {ax['vol']['저']:.1%} / 중 {ax['vol']['중']:.1%} / "
+            f"고 {ax['vol']['고']:.1%}   ·   수익률 하 {ax['ret']['하']:.1%} / "
+            f"중 {ax['ret']['중']:.1%} / 상 {ax['ret']['상']:.1%}",
+            f"   분기당 판정 종목 {ax['전체 최소']}~{ax['전체 최대']}종목 "
+            f"(중앙 {ax['전체 중앙']}).",
+            "⚠ **축은 균등한데 9셀은 전혀 균등하지 않다.** 두 축이 독립이면 각 셀이 11.1% "
+            "여야 하는데 실제는 4.9%~18.5% 다 —",
+            "   변동성이 큰 종목이 수익률 극단으로도 가기 때문이다. "
+            "**셀 크기의 불균등 자체가 아래 ② 산포 결과와 같은 현상이다.**",
+        ]:
+            r = note(ws, r, ln, size=9)
+        r += 1
         r = note(ws, r, "① 통합 — 9셀이 다음 분기 어디로 가나 (%). 무작위면 각 33.3",
                  bold=True, size=12)
         P = C9["pooled"].copy()
         P["변동성"] = pd.Categorical(P["변동성"], VOL3[::-1])
         P["전분기 수익"] = pd.Categorical(P["전분기 수익"], RET3[::-1])
         P = P.sort_values(["변동성", "전분기 수익"])
-        r = put9 = table(ws, P, r + 1,
-                         {"분기수": "#,##0", "평균종목": "#,##0.0",
-                          **{c: "0.0%" for c in ("상", "중", "하", "순위백분위")}},
-                         gcol="변동성", band=3)
+        P = P[["변동성", "전분기 수익", "n합계", "전체 대비", "분기수", "n평균",
+               "n최소", "n최대", "상", "중", "하", "순위백분위"]]
+        r = table(ws, P, r + 1,
+                  {"n합계": "#,##0", "전체 대비": "0.0%", "분기수": "#,##0",
+                   "n평균": "#,##0.0", "n최소": "#,##0", "n최대": "#,##0",
+                   **{c: "0.0%" for c in ("상", "중", "하", "순위백분위")}},
+                  gcol="변동성", band=3)
+        r = note(ws, r, f"   n합계 = 14분기 누적 셀-분기 종목 수 (총 {C9['n_total']:,}). "
+                        f"⚠ 셀-분기 표본이 {MIN_CELL_N}종목 미만이면 그 분기는 제외했다 "
+                        "— 실측 최소가 2종목까지 내려가는데 그런 분기의 비율은 잡음이다"
+                        "(저·상 이 1개 분기 빠져 13분기).", size=9, color="FF6D4C41")
         r += 1
         r = note(ws, r, "② 셀별 부호검정 — 분기를 단위로 (종목이 아니다)", bold=True, size=12)
         r = table(ws, C9["sign"], r + 1,
