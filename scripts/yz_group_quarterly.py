@@ -248,8 +248,96 @@ def cells9(df: pd.DataFrame, tail: int | None = None) -> dict:
             "n_q": D["분기"].nunique(), "n_obs": len(D), "n_total": int(P["n합계"].sum())}
 
 
+def raw_returns(df: pd.DataFrame, example=("2025Q4", "2026Q1"),
+                tail: int | None = None) -> dict:
+    """9셀의 다음 분기 **수익률 원값** — 중앙·평균·표본수.
+
+    케인 지적 2026-09-11: 앞 표(上/中/下 비율, 순위백분위)가 계속 혼란스럽다.
+    "9개 셀의 다음 분기 수익률은 중간값과 평균값이 얼마, 표본은 몇 개야?"
+    → 비율·순위로 바꾸지 말고 **수익률 그대로** 보여주는 표가 필요했다.
+    """
+    C = G._piv(df, "Close")
+    O, H, L = (G._piv(df, c) for c in ("Open", "High", "Low"))
+    Cx, Ox, Hx, Lx = (t.drop(columns=[G.BM], errors="ignore") for t in (C, O, H, L))
+    o, cc = np.log(Ox / Cx.shift(1)), np.log(Cx / Ox)
+    u, dn = np.log(Hx / Ox), np.log(Lx / Ox)
+    rs = u * (u - cc) + dn * (dn - cc)
+    qs = sorted(set(C.index.to_period("Q")))
+
+    def qret(q):
+        s = C.index[C.index.to_period("Q") == q]
+        return Cx.loc[s].apply(lambda c_: (c_.dropna().iloc[-1] / c_.dropna().iloc[0] - 1)
+                               if c_.notna().sum() > 15 else np.nan)
+
+    def one(A, B):
+        s = C.index[C.index.to_period("Q") == A]
+        if tail:
+            s = s[-tail:]
+        n = len(s)
+        k = 0.34 / (1.34 + (n + 1) / (n - 1))
+        sig = np.sqrt(o.loc[s].var(ddof=1) + k * cc.loc[s].var(ddof=1)
+                      + (1 - k) * rs.loc[s].mean())
+        ra, rb = qret(A), qret(B)
+        ok = (sig.notna() & ra.notna() & rb.notna()
+              & (Cx.loc[s].notna().sum() >= n * MIN_COVER))
+        return _t3(sig[ok], VOL3), _t3(ra[ok], RET3), rb[ok]
+
+    def tab(gv, gr, rb, mkt):
+        rows = []
+        for cv in VOL3[::-1]:
+            for cr in RET3[::-1]:
+                x = rb[(gv == cv) & (gr == cr)]
+                if not len(x):
+                    continue
+                rows.append({"변동성": cv, "전분기 수익": cr, "표본": len(x),
+                             "다음분기 중앙": float(x.median()),
+                             "다음분기 평균": float(x.mean()),
+                             "평균−중앙": float(x.mean() - x.median()),
+                             "시장대비 중앙": float(x.median() - mkt)})
+        return pd.DataFrame(rows)
+
+    A, B = pd.Period(example[0]), pd.Period(example[1])
+    gv, gr, rb = one(A, B)
+    ex = {"A": str(A), "B": str(B), "n": len(rb),
+          "mkt_med": float(rb.median()), "mkt_mean": float(rb.mean()),
+          "table": tab(gv, gr, rb, float(rb.median()))}
+
+    rec = []
+    for a, b in zip(qs, qs[1:]):
+        s = C.index[C.index.to_period("Q") == a]
+        if len(s) < MIN_Q_DAYS:
+            continue
+        gv, gr, rb = one(a, b)
+        med = rb.median()
+        for cv in VOL3:
+            for cr in RET3:
+                m = (gv == cv) & (gr == cr)
+                for t_, r_ in rb[m].items():
+                    rec.append({"분기": str(b), "변동성": cv, "전분기 수익": cr,
+                                "r": r_, "초과": r_ - med})
+    D = pd.DataFrame(rec)
+    rows = []
+    for cv in VOL3[::-1]:
+        for cr in RET3[::-1]:
+            x = D[(D["변동성"] == cv) & (D["전분기 수익"] == cr)]
+            rows.append({"변동성": cv, "전분기 수익": cr, "표본": len(x),
+                         "다음분기 중앙": float(x["r"].median()),
+                         "다음분기 평균": float(x["r"].mean()),
+                         "평균−중앙": float(x["r"].mean() - x["r"].median()),
+                         "시장대비 중앙": float(x["초과"].median()),
+                         "시장대비 평균": float(x["초과"].mean())})
+    pool = pd.DataFrame(rows)
+    allrow = {"변동성": "전체", "전분기 수익": "—", "표본": len(D),
+              "다음분기 중앙": float(D["r"].median()), "다음분기 평균": float(D["r"].mean()),
+              "평균−중앙": float(D["r"].mean() - D["r"].median()),
+              "시장대비 중앙": float(D["초과"].median()),
+              "시장대비 평균": float(D["초과"].mean())}
+    return {"example": ex, "pool": pool, "all": allrow,
+            "n_obs": len(D), "n_q": D["분기"].nunique()}
+
+
 def write_xlsx(out: Path, runs: list[tuple[str, pd.DataFrame, dict]],
-               C9: dict | None = None) -> None:
+               C9: dict | None = None, RR: dict | None = None) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -518,6 +606,62 @@ def write_xlsx(out: Path, runs: list[tuple[str, pd.DataFrame, dict]],
         ]:
             r = note(ws, r, ln, size=9)
 
+    # ── 수익률 원값 시트 (케인 요청 2026-09-11) ──
+    if RR:
+        ws = sheet("9셀_수익률원값", [7, 11, 8, 14, 14, 12, 14, 14])
+        ex = RR["example"]
+        r = note(ws, 1, "9셀의 다음 분기 수익률 — 중앙·평균·표본수", bold=True, size=14)
+        r = note(ws, r, "비율(上/中/下)·순위백분위로 바꾸지 않고 **수익률 그대로** 본다",
+                 size=9, color="FF757575")
+        r += 1
+        r = note(ws, r, f"① 실례 — {ex['A']} 기준 9셀 → {ex['B']} 수익률",
+                 bold=True, size=12)
+        r = note(ws, r, f"   전체 {ex['n']}종목 · 시장(동일가중) 중앙 {ex['mkt_med']:+.1%} · "
+                        f"평균 {ex['mkt_mean']:+.1%}", size=10)
+        r = table(ws, ex["table"], r + 1,
+                  {"표본": "#,##0", **{c: "0.0%" for c in
+                                     ("다음분기 중앙", "다음분기 평균", "평균−중앙",
+                                      "시장대비 중앙")}},
+                  signed={"다음분기 중앙", "다음분기 평균", "시장대비 중앙"},
+                  gcol="변동성", band=3)
+        r = note(ws, r, "   ⚠ 한 분기라 셀이 얇다 — 저·상 5종목 · 고·하 8종목. "
+                        "이 표는 '어떻게 읽는가' 의 예시이지 근거가 아니다.",
+                 size=9, color="FF6D4C41")
+        r += 1
+
+        r = note(ws, r, f"② 전 기간 — 분기쌍 {RR['n_q']}개를 모두 풀링 "
+                        f"(셀-분기-종목 관측 {RR['n_obs']:,})", bold=True, size=12)
+        pool = pd.concat([RR["pool"], pd.DataFrame([RR["all"]])], ignore_index=True)
+        r = table(ws, pool, r + 1,
+                  {"표본": "#,##0", **{c: "0.0%" for c in
+                                     ("다음분기 중앙", "다음분기 평균", "평균−중앙",
+                                      "시장대비 중앙", "시장대비 평균")}},
+                  signed={"다음분기 중앙", "다음분기 평균", "시장대비 중앙",
+                          "시장대비 평균"}, gcol="변동성", band=3)
+        r += 1
+        for ln in [
+            "읽기 — ⓐ **시장대비 중앙의 범위가 −1.4% ~ +3.5%p 로 매우 좁다.** "
+            "분기 수익률에서 이 정도 차이는 잡음 범위이고, 앞 시트의 부호검정도 "
+            "전부 p > 0.18 이었다.",
+            "   ⓑ ★ **평균이 중앙보다 훨씬 크다** (전체 중앙 3.2% vs 평균 9.9%). "
+            "수익률 분포가 오른쪽으로 길게 꼬리를 끈다는 뜻이다 —",
+            "      소수의 대박이 평균을 끌어올린다. **평균만 보면 어느 셀이든 좋아 보인다** "
+            "(시장대비 평균이 9셀 전부 양수인 것도 그래서다).",
+            "   ⓒ ★ **평균−중앙 격차 자체가 변동성 그룹을 가른다.**",
+            "        고 그룹  +8.7 / +15.6 / +6.9%p",
+            "        중 그룹  +5.3 / +7.5 / +7.1%p",
+            "        저 그룹  +2.9 / +3.5 / +5.4%p",
+            "      → 고변동 그룹일수록 오른쪽 꼬리가 길다. "
+            "**이것이 앞 시트의 '산포' 결과를 수익률 원값으로 본 모습이다.**",
+            "   ⓓ 중앙으로 가장 높은 칸은 고·중(4.5%)이지만 표본 193개에 부호검정 "
+            "p=0.791 이다 — **셀 하나를 골라 쓸 근거가 못 된다.**",
+            "",
+            "⚠ 풀링이라 분기마다 다른 시장 수준이 섞여 있다 (2026Q2 는 시장 중앙 −4.8%, "
+            "2025Q2 는 +21.8%). '시장대비' 열은 그 분기 시장 중앙을 뺀 값이다.",
+            "⚠ 같은 종목이 여러 분기에 반복 등장한다 — 표본 2,801 은 독립 관측 수가 아니다.",
+        ]:
+            r = note(ws, r, ln, size=9)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
 
@@ -550,8 +694,16 @@ def main() -> int:
     print(f"  산포: 다음분기 중간비율 고 {d.loc['고', mid]:.1%} / 저 {d.loc['저', mid]:.1%}"
           f" · sd 비 {sd['ratio']:.2f}배 ({sd['win']}/{sd['n_q']}분기, p={sd['p']:.4f})")
 
+    print("· 9셀 수익률 원값")
+    RR = raw_returns(df, tail=a.tail)
+    pl = RR["pool"]
+    print(f"  전 기간 풀링 {RR['n_obs']:,}관측 · 전체 중앙 {RR['all']['다음분기 중앙']:.1%} / "
+          f"평균 {RR['all']['다음분기 평균']:.1%}")
+    print(f"  시장대비 중앙 범위 {pl['시장대비 중앙'].min():+.1%} ~ "
+          f"{pl['시장대비 중앙'].max():+.1%}")
+
     out = REPO / "docs" / "holdtiming" / "results" / "YZ그룹_분기예측.xlsx"
-    write_xlsx(out, runs, C9)
+    write_xlsx(out, runs, C9, RR)
     print(f"✅ Excel {out}")
     return 0
 
