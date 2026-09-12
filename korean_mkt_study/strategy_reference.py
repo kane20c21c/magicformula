@@ -1,16 +1,22 @@
 """strategy_reference.py — 대형·고외국인 눌림목 진입 전략 참조 구현.
 
-**v1.2.2.3 (확정 2026-08-17)** — 버전 체계: 모델.유니버스.진입규칙.청산규칙
+**v1.2.3.4 (확정 2026-09-12, 적용 2026-09-14~)** — 버전 체계: 모델.유니버스.진입규칙.청산규칙
 (각 자리는 최초 설정이 1, 조정할 때마다 +1)
   모델 1      : 기본 아이디어 불변 (좋은 유니버스 안에서의 눌림목 매수 타이밍)
   유니버스 2  : ①4조/25% (실운영 설정 — 문서 원안 5조/30% 는 운영된 적 없음)
                 → ②**4조/30%** (2026-08-17 조정)
-  진입규칙 2  : ①60일 고점·MA120 → ②**40일 고점·MA200** (W1, 2026-08-17 조정)
-  청산규칙 3  : ①고정 −20% → ②시간연동 4분기 (2026-08-01) →
-                ③**시간연동 × 변동배율** (2026-08-16)
+  진입규칙 3  : ①60일 고점·MA120 → ②40일 고점·MA200 (W1, 2026-08-17)
+                → ③**W1 + R²·YZR 제외 필터** (2026-09-12: R²₁₂₀ ≥ 0.701 이면서
+                  YZR 10/120 < 0.885 인 '매끈한 추세의 조용한 눌림' 은 사지 않는다)
+  청산규칙 4  : ①고정 −20% → ②시간연동 4분기 (2026-08-01) →
+                ③시간연동 × 변동배율 (2026-08-16) →
+                ④**③ + D+6 종가 검사** (2026-09-12: 최근매수일 D+6 종가 ≤ 평단이면
+                  그날 1회 청산. 그 뒤로는 ③만 — "한 번 거르고, 그 뒤엔 믿고 간다")
+  사이징      : 20슬롯×500만 → **10슬롯×1,000만** (가상계좌 10×400만, 종목 수로 카운트)
 
-직전 운영 모델은 **v1.1.1.2** — 다음 달 모델 평가까지 그림자 모드로 추적한다
-(korean_mkt_study/shadow_track.py, Kane 지시 2026-08-17).
+직전 운영 모델 **v1.2.2.3** 과 그 전 **v1.1.1.2** 를 그림자 모드로 추적한다
+(korean_mkt_study/shadow_track.py, Kane 지시 2026-09-12).
+근거: korean_mkt_study/R2YZ_눌림목연구_20260912.md (11년 신호 12만 건 + 포트 시뮬).
 
 목적: Kane의 맥미니 데이터수집/실시간 모니터링 프로젝트가 그대로 import 하여
       '오늘 어떤 종목이 유니버스에 있고 / 진입신호가 떴는지'를 계산하는 순수 함수 모음.
@@ -21,10 +27,12 @@
 핵심 규약 (STRATEGY.md / strategy_spec.json 과 일치):
   - 신호는 t일 종가로 확정 → 매수는 t+1일 (룩어헤드 방지).
   - 유니버스: 월말 시총 **4조** & 외국인지분 **30%** (다음 달 적용, 일별 ffill).
-  - 진입: **MA200 위** + **40일 고점 대비 10%↑ 눌림**, '새 눌림(onset)'만.
+  - 진입: **MA200 위** + **40일 고점 대비 10%↑ 눌림**, '새 눌림(onset)'만,
+    **단 R²₁₂₀ ≥ 0.701 AND YZR(10/120) < 0.885 인 신호는 제외** (compute_entry_filter).
   - 후보 우선순위: 눌림 깊은 순.
   - 재진입 쿨다운: 1거래일 (판 그날만 금지).
-  - 포트: N=20, 종목당 max 2슬롯(불타기), 슬롯 500만 / 총 1억, 정수주, T+1.
+  - 포트: N=10(종목 수), 종목당 max 2슬롯(불타기), 슬롯 1,000만 / 총 1억, 정수주, T+1.
+  - 청산 검사: 최근매수일 D+6 종가 ≤ 평단 → 그날 청산 (1회). 정본은 SP paper config.
   - ⚠ 청산 정본은 이 파일이 아니라 **StockPortfolio/app/paper/config.py** (청산규칙
     3번째 — 시간연동 4분기 × 변동배율). 여기 check_trailing_stop / TRAIL_STOP_PCT 는
     v1.0.0 백테스트 원안의 잔재로 하위호환용으로만 남김.
@@ -45,7 +53,7 @@ import pandas as pd
 # ────────────────────────────────────────────────────────────────────────────
 # 확정 파라미터 (strategy_spec.json 과 동일. JSON을 로드해 덮어써도 됨)
 # ────────────────────────────────────────────────────────────────────────────
-STRATEGY_VERSION = "1.2.2.3"
+STRATEGY_VERSION = "1.2.3.4"
 
 MKTCAP_MIN_KRW = 4_000_000_000_000     # 유니버스 시총 하한 (4조원) — v1.2.x
 FOREIGN_MIN_PCT = 30.0                 # 유니버스 외국인지분율 하한 (%)
@@ -58,8 +66,23 @@ PULLBACK_RATIO = 0.90                  # close <= 0.90*high_n  (10% 눌림 — �
 
 TRAIL_STOP_PCT = 0.20                  # ⚠ deprecated — v1.0.0 잔재. 청산 정본은 SP paper config
 CAPITAL_KRW = 100_000_000              # 1억
-MAX_POSITIONS = 20                     # N 슬롯
-SLOT_KRW = 5_000_000                   # 슬롯당 500만
+MAX_POSITIONS = 10                     # N 슬롯 — v1.2.3.4 (20→10, 2026-09-12, 종목 수 카운트)
+SLOT_KRW = 10_000_000                  # 슬롯당 1,000만 (가상계좌 400만)
+
+# ── 진입규칙 3번째: R²·YZR 제외 필터 (2026-09-12, 근거 R2YZ_눌림목연구_20260912.md) ──
+#   R²  = 최근 FILTER_R2_WINDOW 거래일 로그종가 vs 시간 선형회귀 R² (추세 매끈함)
+#   YZR = Yang-Zhang σ(FILTER_YZR_SHORT) ÷ σ(FILTER_YZR_LONG) (평소 대비 눌림의 '시끄러움')
+#   제외 = R² ≥ FILTER_R2_MIN AND YZR < FILTER_YZR_MAX — 매끈한 추세가 조용히 흘러내리는
+#          눌림은 분배(추세 꺾임)일 확률이 높다. 11년 4조↑ 신호에서 5일 승률 41% (전체 최악 셀).
+#   임계 = 2014~2021 운영 유니버스 신호 893건의 3분위 (룩어헤드 회피 — 이후 고정)
+FILTER_R2_WINDOW = 120
+FILTER_R2_MIN = 0.701
+FILTER_YZR_SHORT = 10
+FILTER_YZR_LONG = 120
+FILTER_YZR_MAX = 0.885
+
+# ── 청산규칙 4번째: D+6 종가 검사 (2026-09-12) — 값의 정본은 SP paper config.check_day ──
+CHECK_DAY = 6                          # 최근매수일 D+6 종가 ≤ 평단 → 그날 청산 (1회)
 MAX_SLOTS_PER_STOCK = 2                # 불타기 max2
 REENTRY_COOLDOWN_DAYS = 1              # 판 그날만 금지
 FEE_PER_SIDE = 0.003                   # 편도 0.3%
@@ -124,6 +147,71 @@ def compute_indicators(close_wide: pd.DataFrame, elig_daily: Optional[pd.DataFra
     entry = cond.fillna(False)
     onset = entry & ~entry.shift(1).fillna(False)   # 전일 False → 오늘 True
     return Indicators(high_n, ma_trend, depth, entry, onset)
+
+
+def _rolling_r2(y: pd.DataFrame, w: int) -> pd.DataFrame:
+    """로그가격 y 의 창 w 선형회귀 R² (누적합 벡터화, 창 안 NaN 있으면 NaN).
+    korean_mkt_study/r2_yz_events.rolling_r2_slope 와 동일 산식 (np.polyfit 대비 1e-10 일치)."""
+    m = y.notna().to_numpy()
+    yv = np.where(m, y.to_numpy(), 0.0)
+    first = np.where(m.any(0), yv[np.argmax(m, axis=0), np.arange(yv.shape[1])], 0.0)
+    yv = np.where(m, yv - first, 0.0)
+    t = np.arange(yv.shape[0], dtype=np.float64)[:, None]
+
+    def wsum(a):
+        c = np.cumsum(a, axis=0)
+        out = c.copy()
+        out[w:] = c[w:] - c[:-w]
+        out[: w - 1] = np.nan
+        return out
+
+    cnt = wsum(m.astype(np.float64))
+    Sy, Syy, Sty = wsum(yv), wsum(yv * yv), wsum(t * yv)
+    Siy = Sty - ((t[:, 0] - w + 1)[:, None]) * Sy
+    Si = w * (w - 1) / 2.0
+    Sii = (w - 1) * w * (2 * w - 1) / 6.0
+    sxx, sxy, syy = w * Sii - Si * Si, w * Siy - Si * Sy, w * Syy - Sy * Sy
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r2 = (sxy * sxy) / (sxx * syy)
+    r2[~(cnt == w)] = np.nan
+    return pd.DataFrame(np.clip(r2, 0.0, 1.0), index=y.index, columns=y.columns)
+
+
+def _yang_zhang(op: pd.DataFrame, hi: pd.DataFrame, lo: pd.DataFrame,
+                cl: pd.DataFrame, n: int) -> pd.DataFrame:
+    """Yang-Zhang 일간 σ — LLV indicator_calculator / backtest._yang_zhang 와 동일 산식."""
+    prev_c = cl.shift(1)
+    o = np.log(op / prev_c)
+    c = np.log(cl / op)
+    u = np.log(hi / op)
+    d = np.log(lo / op)
+    v_o = o.rolling(n, min_periods=n).var(ddof=1)
+    v_c = c.rolling(n, min_periods=n).var(ddof=1)
+    v_rs = (u * (u - c) + d * (d - c)).rolling(n, min_periods=n).mean()
+    k = 0.34 / (1.34 + (n + 1) / (n - 1))
+    return np.sqrt((v_o + k * v_c + (1 - k) * v_rs).clip(lower=0))
+
+
+@dataclass
+class EntryFilter:
+    r2: pd.DataFrame          # R²(FILTER_R2_WINDOW)
+    yzr: pd.DataFrame         # YZ(short)/YZ(long)
+    excluded: pd.DataFrame    # bool — True 면 그날 onset 이 떠도 사지 않는다
+
+
+def compute_entry_filter(open_wide: pd.DataFrame, high_wide: pd.DataFrame,
+                         low_wide: pd.DataFrame, close_wide: pd.DataFrame) -> EntryFilter:
+    """진입규칙 3번째 — R²·YZR 제외 필터 (v1.2.3.4).
+
+    excluded = (R²₁₂₀ ≥ FILTER_R2_MIN) & (YZR 10/120 < FILTER_YZR_MAX).
+    값을 못 구한 날(NaN, 워밍업 부족)은 **제외하지 않는다** — 필터는 보수적으로 꺼진다.
+    가격 0(거래정지)은 NaN 으로 취급한다. 입력은 모두 같은 index/columns 의 wide 패널.
+    """
+    op, hi, lo, cl = (x.where(x > 0) for x in (open_wide, high_wide, low_wide, close_wide))
+    r2 = _rolling_r2(np.log(cl), FILTER_R2_WINDOW)
+    yzr = _yang_zhang(op, hi, lo, cl, FILTER_YZR_SHORT) / _yang_zhang(op, hi, lo, cl, FILTER_YZR_LONG)
+    excluded = ((r2 >= FILTER_R2_MIN) & (yzr < FILTER_YZR_MAX)).fillna(False)
+    return EntryFilter(r2, yzr, excluded)
 
 
 def check_trailing_stop(peak_price: float, current_close: float, trail_pct: float = TRAIL_STOP_PCT) -> bool:

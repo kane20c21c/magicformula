@@ -1,0 +1,281 @@
+{
+  "strategy_id": "kr_pullback_largecap_foreign",
+  "base_date": "2026-08-31",
+  "apply_month": "2026-09",
+  "filters": {
+    "mktcap_min_krw": 4000000000000,
+    "foreign_ratio_min_pct": 30.0
+  },
+  "created_by": "클로이 (Kane 확정 v1.2.3.4 — 유니버스 2번째 유지, 2026-09-12)",
+  "count": 44,
+  "data_provenance": {
+    "derived_from": "LLV panel.parquet (MarketCap·Foreign_Ratio, 2026-08-31 마지막 유효값) + data_ext/meta 우선주·스팩·관리 플래그",
+    "note": "LLV 패널 208종목 기준 산출 — 4조↑ 후보는 전부 패널 안에 있음(2026-09-12 확인 147/147). 9월 첫 거래일(9/14) 적용. 2026-09-01~11 신호는 8월 파일(6/30 기준) 폴백으로 처리됐음."
+  },
+  "stocks": [
+    {
+      "ticker": "005930",
+      "name": "삼성전자",
+      "mktcap_krw": 1520032438080000,
+      "foreign_ratio_pct": 46.72
+    },
+    {
+      "ticker": "000660",
+      "name": "SK하이닉스",
+      "mktcap_krw": 1222844219010000,
+      "foreign_ratio_pct": 50.56
+    },
+    {
+      "ticker": "402340",
+      "name": "SK스퀘어",
+      "mktcap_krw": 136805185926000,
+      "foreign_ratio_pct": 46.28
+    },
+    {
+      "ticker": "009150",
+      "name": "삼성전기",
+      "mktcap_krw": 108903408768000,
+      "foreign_ratio_pct": 37.93
+    },
+    {
+      "ticker": "105560",
+      "name": "KB금융",
+      "mktcap_krw": 61467384302200,
+      "foreign_ratio_pct": 79.25
+    },
+    {
+      "ticker": "028260",
+      "name": "삼성물산",
+      "mktcap_krw": 61056094246500,
+      "foreign_ratio_pct": 30.91
+    },
+    {
+      "ticker": "012450",
+      "name": "한화에어로스페이스",
+      "mktcap_krw": 56822867902000,
+      "foreign_ratio_pct": 45.5
+    },
+    {
+      "ticker": "000270",
+      "name": "기아",
+      "mktcap_krw": 51144102738000,
+      "foreign_ratio_pct": 39.27
+    },
+    {
+      "ticker": "055550",
+      "name": "신한지주",
+      "mktcap_krw": 51123131027100,
+      "foreign_ratio_pct": 62.09
+    },
+    {
+      "ticker": "012330",
+      "name": "현대모비스",
+      "mktcap_krw": 40733635297500,
+      "foreign_ratio_pct": 37.77
+    },
+    {
+      "ticker": "034730",
+      "name": "SK",
+      "mktcap_krw": 39513973135000,
+      "foreign_ratio_pct": 30.08
+    },
+    {
+      "ticker": "086790",
+      "name": "하나금융지주",
+      "mktcap_krw": 37396324052400,
+      "foreign_ratio_pct": 68.15
+    },
+    {
+      "ticker": "035420",
+      "name": "NAVER",
+      "mktcap_krw": 33000598547000,
+      "foreign_ratio_pct": 35.93
+    },
+    {
+      "ticker": "000810",
+      "name": "삼성화재",
+      "mktcap_krw": 29690569545000,
+      "foreign_ratio_pct": 57.93
+    },
+    {
+      "ticker": "267260",
+      "name": "HD현대일렉트릭",
+      "mktcap_krw": 28152812435000,
+      "foreign_ratio_pct": 34.52
+    },
+    {
+      "ticker": "005490",
+      "name": "POSCO홀딩스",
+      "mktcap_krw": 26823256889500,
+      "foreign_ratio_pct": 32.24
+    },
+    {
+      "ticker": "316140",
+      "name": "우리금융지주",
+      "mktcap_krw": 24903385626600,
+      "foreign_ratio_pct": 48.23
+    },
+    {
+      "ticker": "009540",
+      "name": "HD한국조선해양",
+      "mktcap_krw": 24664430926000,
+      "foreign_ratio_pct": 33.19
+    },
+    {
+      "ticker": "017670",
+      "name": "SK텔레콤",
+      "mktcap_krw": 20233222992600,
+      "foreign_ratio_pct": 34.36
+    },
+    {
+      "ticker": "051910",
+      "name": "LG화학",
+      "mktcap_krw": 19765856040000,
+      "foreign_ratio_pct": 37.33
+    },
+    {
+      "ticker": "033780",
+      "name": "KT&G",
+      "mktcap_krw": 18488642213600,
+      "foreign_ratio_pct": 50.91
+    },
+    {
+      "ticker": "003550",
+      "name": "LG",
+      "mktcap_krw": 18052325277600,
+      "foreign_ratio_pct": 37.2
+    },
+    {
+      "ticker": "278470",
+      "name": "에이피알",
+      "mktcap_krw": 17390022997500,
+      "foreign_ratio_pct": 38.04
+    },
+    {
+      "ticker": "010950",
+      "name": "S-Oil",
+      "mktcap_krw": 16898677079200,
+      "foreign_ratio_pct": 79.28
+    },
+    {
+      "ticker": "086280",
+      "name": "현대글로비스",
+      "mktcap_krw": 15562500000000,
+      "foreign_ratio_pct": 46.51
+    },
+    {
+      "ticker": "064350",
+      "name": "현대로템",
+      "mktcap_krw": 14865180306600,
+      "foreign_ratio_pct": 39.53
+    },
+    {
+      "ticker": "030200",
+      "name": "KT",
+      "mktcap_krw": 13457957979000,
+      "foreign_ratio_pct": 49.0
+    },
+    {
+      "ticker": "005830",
+      "name": "DB손해보험",
+      "mktcap_krw": 11862113203900,
+      "foreign_ratio_pct": 44.06
+    },
+    {
+      "ticker": "071050",
+      "name": "한국금융지주",
+      "mktcap_krw": 10710535662400,
+      "foreign_ratio_pct": 36.97
+    },
+    {
+      "ticker": "259960",
+      "name": "크래프톤",
+      "mktcap_krw": 10384783061000,
+      "foreign_ratio_pct": 43.55
+    },
+    {
+      "ticker": "443060",
+      "name": "HD현대마린솔루션",
+      "mktcap_krw": 9302942950000,
+      "foreign_ratio_pct": 30.37
+    },
+    {
+      "ticker": "028050",
+      "name": "삼성E&A",
+      "mktcap_krw": 9231600000000,
+      "foreign_ratio_pct": 38.42
+    },
+    {
+      "ticker": "161390",
+      "name": "한국타이어앤테크놀로지",
+      "mktcap_krw": 8250079595400,
+      "foreign_ratio_pct": 39.37
+    },
+    {
+      "ticker": "021240",
+      "name": "코웨이",
+      "mktcap_krw": 6857363579400,
+      "foreign_ratio_pct": 54.45
+    },
+    {
+      "ticker": "032640",
+      "name": "LG유플러스",
+      "mktcap_krw": 6362171702680,
+      "foreign_ratio_pct": 41.46
+    },
+    {
+      "ticker": "241560",
+      "name": "두산밥캣",
+      "mktcap_krw": 5971832849500,
+      "foreign_ratio_pct": 39.18
+    },
+    {
+      "ticker": "175330",
+      "name": "JB금융지주",
+      "mktcap_krw": 5287893710400,
+      "foreign_ratio_pct": 34.33
+    },
+    {
+      "ticker": "271560",
+      "name": "오리온",
+      "mktcap_krw": 5138742440000,
+      "foreign_ratio_pct": 39.01
+    },
+    {
+      "ticker": "058470",
+      "name": "리노공업",
+      "mktcap_krw": 5075709210000,
+      "foreign_ratio_pct": 31.18
+    },
+    {
+      "ticker": "036570",
+      "name": "NC",
+      "mktcap_krw": 4836632939000,
+      "foreign_ratio_pct": 38.33
+    },
+    {
+      "ticker": "051900",
+      "name": "LG생활건강",
+      "mktcap_krw": 4687338699000,
+      "foreign_ratio_pct": 31.5
+    },
+    {
+      "ticker": "138930",
+      "name": "BNK금융지주",
+      "mktcap_krw": 4663964215200,
+      "foreign_ratio_pct": 38.43
+    },
+    {
+      "ticker": "001450",
+      "name": "현대해상",
+      "mktcap_krw": 4339135925000,
+      "foreign_ratio_pct": 39.45
+    },
+    {
+      "ticker": "403870",
+      "name": "HPSP",
+      "mktcap_krw": 4131460000000,
+      "foreign_ratio_pct": 32.96
+    }
+  ]
+}

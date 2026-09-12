@@ -100,3 +100,6 @@ output/redesign_pos52_panel.parquet
 
 # Excel 잠금 파일 (파일을 연 채로 재생성하면 생긴다)
 ~$*
+
+# 2026-09-12 스윙 포트 데이터 연장 사본 (build_data_ext.py 로 재생성 — 정본은 data/ 스냅샷)
+korean_mkt_study/data_ext/
