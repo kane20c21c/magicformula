@@ -41,16 +41,18 @@ if __name__ == "__main__":
     if not files: sys.exit("build/eh_*.parquet 없음")
     res = {}
     for f in files:
-        R = pd.read_parquet(f); R["Date"] = pd.to_datetime(R.Date); h = R.hyp.iloc[0]
+        R = pd.read_parquet(f); R["Date"] = pd.to_datetime(R.Date)
+        h = os.path.basename(f)[3:-8]          # 파일명 기준 라벨 (eh_mkt_ens → mkt_ens): 같은 hyp 의 LGBM/앙상블 결과가 덮어쓰지 않게
         W = daily(R); W["d"] = pd.to_datetime(W.d)
         res[h] = {"full": summarize(W), "post": summarize(W[W.d >= a.split]), "pre": summarize(W[W.d < a.split])}
     for per in ["full", "pre", "post"]:
         print(f"\n== {per} ==")
         print(pd.DataFrame({h: v[per] for h, v in res.items()}).T.round(3).to_string())
-    if "base" in res:
-        b = res["base"]; print("\n== 사전 등록 판정 (base 대비) ==")
+    bases = [h for h in res if h.startswith("base")]
+    for bh in bases:
+        suf = bh[4:]; b = res[bh]; print(f"\n== 사전 등록 판정 ({bh} 대비, 같은 접미사끼리) ==")
         for h, v in res.items():
-            if h == "base": continue
+            if h.startswith("base") or h[h.find("_"):] != suf and not (suf == "" and "_" not in h): continue
             c1 = v["full"]["ic"] >= b["full"]["ic"] - 0.010
             c2 = v["full"]["ex10"] >= b["full"]["ex10"]
             c3 = v["post"]["ic"] > b["post"]["ic"]
