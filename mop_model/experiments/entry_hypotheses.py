@@ -160,7 +160,12 @@ def add_sector_target(d):
     return d
 
 
-def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=True):
+def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=True, seed=None, shuffle_cols=False):
+    """seed / shuffle_cols: 잡음 바닥 측정용 (2026-09-13 케인 질문 "피처 순서가 결과를 바꾸나").
+    seed 는 LGBM random_state·CatBoost random_seed 를 함께 바꾼다(피처 서브샘플 colsample_bytree=0.7 의 추첨이 달라짐).
+    shuffle_cols 는 피처 열 순서만 섞는다 — 같은 seed 에서도 추첨·동률 분할 선택이 달라지므로 순서 효과를 따로 잰다."""
+    if seed is not None:
+        cfg.LGBM_PARAMS["random_state"] = int(seed); cfg.CAT_PARAMS["random_seed"] = int(seed)
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
     d["Date"] = pd.to_datetime(d.Date)
     cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
@@ -178,6 +183,9 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
         d = add_sector_target(d); target = "y_sec"
         print(f"[secrel] y_sec 양성률 {d.y_sec.mean():.3f} (y_rel {d.y_rel.mean():.3f})", flush=True)
     d = d.sort_values(["Date", "Ticker"]).reset_index(drop=True)
+    if shuffle_cols:
+        cols = list(np.random.RandomState(seed if seed is not None else 0).permutation(cols))
+        print(f"[{hyp}] 피처 열 순서 셔플 (seed={seed}) — 앞 5개 {cols[:5]}", flush=True)
 
     alldays = np.sort(d.Date.unique())
     nxt = {alldays[i]: alldays[i + 1] for i in range(len(alldays) - 1)}
@@ -223,6 +231,8 @@ if __name__ == "__main__":
     ap.add_argument("--retrain-every", type=int, default=RETRAIN_EVERY)
     ap.add_argument("--no-ensemble", action="store_true", help="LGBM 단독 (스모크/속도용)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--seed", type=int, default=None, help="LGBM/CatBoost 난수 시드 (기본 config 42)")
+    ap.add_argument("--shuffle-cols", action="store_true", help="피처 열 순서 셔플 (순서 효과 측정)")
     a = ap.parse_args()
     out = a.out or os.path.join(cfg.OUT_DIR, f"eh_{a.hyp}.parquet")
-    run(a.hyp, a.start, a.end, out, a.retrain_every, not a.no_ensemble)
+    run(a.hyp, a.start, a.end, out, a.retrain_every, not a.no_ensemble, a.seed, a.shuffle_cols)
