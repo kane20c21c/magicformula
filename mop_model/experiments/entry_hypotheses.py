@@ -23,7 +23,22 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
            섹터 전체가 꺾이면 현행 타깃은 그 섹터 종목에 전부 0을 준다 → 섹터 방향을
            못 맞히면 종목 선별력까지 같이 죽는다는 가설.
 
-사전 등록 판정 기준 (entry_eval.py 가 계산; 결과 보고 바꾸지 않는다):
+2차 가설 (2026-09-12 밤, 케인 지시 — 1차 결과: mkt 근소 통과·불안정, recent/secrel 기각):
+  yz     : + 종목 YZ 변동성 6개 (YZ_20 · YZ_60 · 20/60 비 · BM(102110) 대비 배율 · 앞 둘의 그날 백분위).
+           LLV core/extend 컬럼 그대로 (2023-02~, 결손 0.1%).
+  opt    : + OptGauge 옵션 게이지 10개 (LLV data/indicators/gauge_daily.parquet, 2015~).
+           ⚠ 게이지는 **t+1 08:01 KRX 확정치**로 계산되므로 16:20 신호 시점엔 t−1 값까지만
+           안다 → **하루 지연(lag 1)** 으로 붙인다. 컬럼: VK dVK ATM_IV dATM_IV Skew_norm
+           TS_ratio PCR_OI_all VRP_YZ BF_05s_norm on_share.
+  yzopt  : yz + opt 동시.
+  (SpotGauge 온도·Vblk 는 일지가 2026-02-19 부터라 2023-05 이후 학습 구간을 못 덮는다 —
+   백필 가능 여부 확인 후 3차. 포함하지 않았다.)
+
+2차 판정 기준 (v2, 사전 등록 — 1차에서 근소 통과를 못 거른 반성):
+  v1 3조건 + ④ 전구간 IC 음수일 비율 ≤ base + 2%p + ⑤ 18일 롤링 IC 최저 ≥ base 최저 − 0.01.
+  다섯 개 전부 만족해야 채택 후보.
+
+사전 등록 판정 기준 (v1, 1차 — entry_eval.py 가 계산; 결과 보고 바꾸지 않는다):
   채택 후보 = 전 구간(2025-08-25~) 일별 IC 평균이 base − 0.010 이상
               AND rank≤10 초과갭이 base 이상
               AND 2026-08-18 이후 구간 IC 가 base 보다 높음
@@ -35,6 +50,9 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
   python3 entry_hypotheses.py --hyp mkt    --start 2025-08-25 --end 2026-09-10
   python3 entry_hypotheses.py --hyp recent --start 2025-08-25 --end 2026-09-10
   python3 entry_hypotheses.py --hyp secrel --start 2025-08-25 --end 2026-09-10
+  python3 entry_hypotheses.py --hyp yz     --start 2025-08-25 --end 2026-09-10   # 2차
+  python3 entry_hypotheses.py --hyp opt    --start 2025-08-25 --end 2026-09-10   # 2차 (gauge_daily 동기화 필요)
+  python3 entry_hypotheses.py --hyp yzopt  --start 2025-08-25 --end 2026-09-10   # 2차
   (스모크: --start 2026-08-01 --end 2026-08-10 --no-ensemble  ≈ 2~3분)
   결과: build/eh_<hyp>.parquet · 로그는 stdout → tee build/eh_<hyp>.log
   ⚠ features.parquet 이 --end 다음 거래일까지 있어야 한다 (Gap_T1 라벨).
@@ -55,6 +73,10 @@ from model import fit_predict             # noqa: E402
 RETRAIN_EVERY = 5
 RECENT_DAYS = 250
 
+YZ_COLS = ["yz20", "yz60", "yz_ratio", "yz_bm", "xs_yz20", "xs_yz_ratio"]
+OPT_SRC = ["VK", "dVK", "ATM_IV", "dATM_IV", "Skew_norm", "TS_ratio", "PCR_OI_all", "VRP_YZ", "BF_05s_norm", "on_share"]
+OPT_COLS = ["opt_" + c for c in OPT_SRC]
+GAUGE_PATH = os.path.join(cfg.LLV_PATH, "data", "indicators", "gauge_daily.parquet")
 MKT_COLS = ["mkt_ret1", "mkt_ret5", "mkt_ret20", "mkt_breadth1", "mkt_gapdn3", "mkt_gap0_mean",
             "mkt_disp1", "mkt_vol20", "mkt_updays5", "bm_ret1", "bm_ret5", "bm_gap0", "bm_vol20"]
 
@@ -96,6 +118,38 @@ def add_market_state(d):
     return d
 
 
+def add_yz(d):
+    """종목 YZ 변동성 (LLV 정본 컬럼). BM 배율은 LLV CLAUDE.md 의 '소비자 계산' 파생."""
+    cols = ["Date", "Ticker", "YZ_20", "YZ_60"]
+    v = pd.concat([pd.read_parquet(cfg.CORE, columns=cols), pd.read_parquet(cfg.EXTEND, columns=cols)])
+    v = v.drop_duplicates(["Ticker", "Date"]); v["Date"] = pd.to_datetime(v.Date)
+    bm = v[v.Ticker == "102110"].set_index("Date").YZ_20.rename("_yz_bm")
+    d = d.merge(v, on=["Date", "Ticker"], how="left").merge(bm, left_on="Date", right_index=True, how="left")
+    d["yz20"] = d.YZ_20; d["yz60"] = d.YZ_60
+    d["yz_ratio"] = d.YZ_20 / d.YZ_60.replace(0, np.nan)
+    d["yz_bm"] = d.YZ_20 / d._yz_bm.replace(0, np.nan)
+    d["xs_yz20"] = d.groupby("Date").yz20.rank(pct=True)
+    d["xs_yz_ratio"] = d.groupby("Date").yz_ratio.rank(pct=True)
+    d = d.drop(columns=["YZ_20", "YZ_60", "_yz_bm"]).replace([np.inf, -np.inf], np.nan)
+    print(f"[yz] 결손율 {d[YZ_COLS].isna().mean().round(4).to_dict()}", flush=True)
+    return d
+
+
+def add_opt(d, end):
+    """OptGauge 일별 게이지 — lag 1 (t 행에 t−1 게이지). 게이지 parquet 의 마지막 날짜가
+    --end 보다 앞서면 그 뒤 행은 결손 → 학습·평가가 왜곡되므로 단언으로 막는다."""
+    g = pd.read_parquet(GAUGE_PATH); g["Date"] = pd.to_datetime(g.Date)
+    g = g.sort_values("Date").set_index("Date")[OPT_SRC]
+    g = g.shift(1)                                    # ★ lag 1: t 행에 t−1 확정 게이지
+    g.columns = OPT_COLS
+    need = pd.Timestamp(end)
+    assert g.index.max() >= need, (f"gauge_daily.parquet 이 {g.index.max().date()} 까지뿐 — --end {need.date()} 까지 필요 "
+                                   f"(미니 LLV data/indicators/gauge_daily.parquet 을 에어로 동기화)")
+    d = d.merge(g, left_on="Date", right_index=True, how="left")
+    print(f"[opt] 결손율 {d[OPT_COLS].isna().mean().round(4).to_dict()}", flush=True)
+    return d
+
+
 def add_sector_target(d):
     """y_sec = Gap_T1 > 같은 (Date, sector_top) 중앙값. 섹터 종목수 < MIN_SECTOR_N 이면 전체 중앙값."""
     n = d.groupby(["Date", "sector_top"]).Gap_T1.transform("size")
@@ -115,6 +169,11 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
         d = add_market_state(d); cols = cols + MKT_COLS
         print(f"[mkt] 시장 피처 {len(MKT_COLS)}개 추가 · 결손율 "
               f"{d[MKT_COLS].isna().mean().round(3).to_dict()}", flush=True)
+    elif hyp in ("yz", "opt", "yzopt"):
+        if hyp in ("yz", "yzopt"):
+            d = add_yz(d); cols = cols + YZ_COLS
+        if hyp in ("opt", "yzopt"):
+            d = add_opt(d, end); cols = cols + OPT_COLS
     elif hyp == "secrel":
         d = add_sector_target(d); target = "y_sec"
         print(f"[secrel] y_sec 양성률 {d.y_sec.mean():.3f} (y_rel {d.y_rel.mean():.3f})", flush=True)
@@ -159,7 +218,7 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hyp", required=True, choices=["base", "mkt", "recent", "secrel"])
+    ap.add_argument("--hyp", required=True, choices=["base", "mkt", "recent", "secrel", "yz", "opt", "yzopt"])
     ap.add_argument("--start", required=True); ap.add_argument("--end", required=True)
     ap.add_argument("--retrain-every", type=int, default=RETRAIN_EVERY)
     ap.add_argument("--no-ensemble", action="store_true", help="LGBM 단독 (스모크/속도용)")

@@ -29,7 +29,9 @@ def daily(R):
 
 
 def summarize(W):
+    roll = W.set_index("d").ic.rolling(18).mean() if len(W) >= 18 else pd.Series(dtype=float)
     return {"days": len(W), "ic": W.ic.mean(), "ic_neg%": (W.ic < 0).mean() * 100,
+            "roll18_min": roll.min() if len(roll) else np.nan,
             "ex10": W.ex10.mean(), "lose10%": (W.ex10 < 0).mean() * 100,
             "gap5": W.gap5.mean(), "intra5": W.intra5.mean(), "ret5": W.ret5.mean(),
             "ret5-uni": (W.ret5 - W.uret).mean(), "sec_max10": W.sec_max10.mean()}
@@ -56,5 +58,8 @@ if __name__ == "__main__":
             c1 = v["full"]["ic"] >= b["full"]["ic"] - 0.010
             c2 = v["full"]["ex10"] >= b["full"]["ex10"]
             c3 = v["post"]["ic"] > b["post"]["ic"]
-            print(f"  {h:7s} 전구간IC {'O' if c1 else 'X'} · 초과갭 {'O' if c2 else 'X'} · 최근IC {'O' if c3 else 'X'} → "
-                  f"{'채택 후보' if (c1 and c2 and c3) else '기각'}")
+            c4 = v["full"]["ic_neg%"] <= b["full"]["ic_neg%"] + 2.0
+            c5 = v["full"]["roll18_min"] >= b["full"]["roll18_min"] - 0.010
+            print(f"  {h:7s} v1: 전구간IC {'O' if c1 else 'X'} · 초과갭 {'O' if c2 else 'X'} · 최근IC {'O' if c3 else 'X'} → "
+                  f"{'채택 후보' if (c1 and c2 and c3) else '기각'}  |  v2(+음수일 {'O' if c4 else 'X'} · 롤링최저 {'O' if c5 else 'X'}) → "
+                  f"{'채택 후보' if (c1 and c2 and c3 and c4 and c5) else '기각'}")
