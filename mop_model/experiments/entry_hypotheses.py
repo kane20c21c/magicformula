@@ -34,6 +34,19 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
   (SpotGauge 온도·Vblk 는 일지가 2026-02-19 부터라 2023-05 이후 학습 구간을 못 덮는다 —
    백필 가능 여부 확인 후 3차. 포함하지 않았다.)
 
+3차 가설 (2026-09-13 케인 설계 — "위쪽은 더 날카롭게, 아래쪽은 따로, 둘을 결합"):
+  top30  : 타깃을 y_top30 = (Gap_T1 > 그날 70백분위) 로 조임 (양성 30%). 부호가 아니라 "크게 튀는 쪽"을 배우게.
+  dn     : **별도 하강 모델**. 타깃 y_dn = (Gap_T1 − 그날 중앙값 < −2%) — 시장조정 −2%.
+           절대 −2% 는 양성의 72% 가 쇼크일 39일에 뭉쳐 시장 피처 없는 모델이 배울 수 없어 기각
+           (2026-09-13 통계: 절대 −2% 양성률 11.2%·일별 중앙 2.2%/최대 95%, 시장조정 −2% 6.2%·중앙 4.0%/최대 29%).
+           결과 parquet 의 p 는 "큰 개별 갭다운" 가능성의 그날 백분위 (entry_eval 이 p_dn 으로 결합).
+  결합(재학습 없음, entry_eval.py): 그날 p_dn ≥ 0.90 (상위 10%, ≈20종목) 을 후보에서 제외하고 p 순으로 재순위.
+           비교표 = base / base+거부권 / top30 / top30+거부권 → 거부권 효과와 타깃 교체 효과 분리.
+3차 판정 기준 (v3, 사전 등록): ① 전구간 IC ≥ 0.138 (시드 하한) ② rank≤10 초과갭 ≥ 0.557%p (시드 하한)
+  ③ 전구간 좌측 꼬리 초과(top10 <−2% 비율 − 유니버스) ≤ base − 1.0%p ④ 전구간 우측 꼬리 초과 ≥ base − 1.0%p
+  ⑤ 8/18 이후 좌측 꼬리 초과 < base. 다섯 개 전부. 보조 지표(판정 아님): top10 내 p↔p_dn 상관, 일평균 거부 종목 수
+  (거부가 0~1개면 p_dn 이 p 의 거울상이라 무용, 2~3개인데 좌측이 줄면 다른 것을 배운 것).
+
 2차 판정 기준 (v2, 사전 등록 — 1차에서 근소 통과를 못 거른 반성):
   v1 3조건 + ④ 전구간 IC 음수일 비율 ≤ base + 2%p + ⑤ 18일 롤링 IC 최저 ≥ base 최저 − 0.01.
   다섯 개 전부 만족해야 채택 후보.
@@ -53,6 +66,8 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
   python3 entry_hypotheses.py --hyp yz     --start 2025-08-25 --end 2026-09-10   # 2차
   python3 entry_hypotheses.py --hyp opt    --start 2025-08-25 --end 2026-09-10   # 2차 (gauge_daily 동기화 필요)
   python3 entry_hypotheses.py --hyp yzopt  --start 2025-08-25 --end 2026-09-10   # 2차
+  python3 entry_hypotheses.py --hyp top30  --start 2025-08-25 --end 2026-09-10 --out ../build/eh_top30_ens.parquet   # 3차
+  python3 entry_hypotheses.py --hyp dn     --start 2025-08-25 --end 2026-09-10 --out ../build/eh_dn_ens.parquet      # 3차
   (스모크: --start 2026-08-01 --end 2026-08-10 --no-ensemble  ≈ 2~3분)
   결과: build/eh_<hyp>.parquet · 로그는 stdout → tee build/eh_<hyp>.log
   ⚠ features.parquet 이 --end 다음 거래일까지 있어야 한다 (Gap_T1 라벨).
@@ -150,6 +165,18 @@ def add_opt(d, end):
     return d
 
 
+def add_top30_target(d):
+    q70 = d.groupby("Date").Gap_T1.transform(lambda s: s.quantile(0.7))
+    d["y_top30"] = np.where(d.Gap_T1.isna() | q70.isna(), np.nan, (d.Gap_T1 > q70).astype(float))
+    return d
+
+
+def add_dn_target(d, thr=-0.02):
+    med = d.groupby("Date").Gap_T1.transform("median")
+    d["y_dn"] = np.where(d.Gap_T1.isna() | med.isna(), np.nan, ((d.Gap_T1 - med) < thr).astype(float))
+    return d
+
+
 def add_sector_target(d):
     """y_sec = Gap_T1 > 같은 (Date, sector_top) 중앙값. 섹터 종목수 < MIN_SECTOR_N 이면 전체 중앙값."""
     n = d.groupby(["Date", "sector_top"]).Gap_T1.transform("size")
@@ -179,6 +206,12 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
             d = add_yz(d); cols = cols + YZ_COLS
         if hyp in ("opt", "yzopt"):
             d = add_opt(d, end); cols = cols + OPT_COLS
+    elif hyp == "top30":
+        d = add_top30_target(d); target = "y_top30"
+        print(f"[top30] y_top30 양성률 {d.y_top30.mean():.3f}", flush=True)
+    elif hyp == "dn":
+        d = add_dn_target(d); target = "y_dn"
+        print(f"[dn] y_dn(시장조정 −2%) 양성률 {d.y_dn.mean():.3f}", flush=True)
     elif hyp == "secrel":
         d = add_sector_target(d); target = "y_sec"
         print(f"[secrel] y_sec 양성률 {d.y_sec.mean():.3f} (y_rel {d.y_rel.mean():.3f})", flush=True)
@@ -226,7 +259,7 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hyp", required=True, choices=["base", "mkt", "recent", "secrel", "yz", "opt", "yzopt"])
+    ap.add_argument("--hyp", required=True, choices=["base", "mkt", "recent", "secrel", "yz", "opt", "yzopt", "top30", "dn"])
     ap.add_argument("--start", required=True); ap.add_argument("--end", required=True)
     ap.add_argument("--retrain-every", type=int, default=RETRAIN_EVERY)
     ap.add_argument("--no-ensemble", action="store_true", help="LGBM 단독 (스모크/속도용)")

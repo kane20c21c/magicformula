@@ -14,12 +14,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import config as cfg  # noqa: E402
 
 
+THR = 0.02   # 꼬리 정의 |갭| > 2%
+
+
 def daily(R):
     rows = []
     for D, g in R.dropna(subset=["Gap_T1"]).groupby("Date"):
         if len(g) < 50: continue
         ug = g.Gap_T1.mean(); t10 = g[g["rank"] <= 10]; t5 = g[g["rank"] <= 5]
         rows.append({"d": D, "ic": spearmanr(g.p, g.Gap_T1).correlation,
+                     "right_ex": ((t10.Gap_T1 > THR).mean() - (g.Gap_T1 > THR).mean()) * 100,
+                     "left_ex": ((t10.Gap_T1 < -THR).mean() - (g.Gap_T1 < -THR).mean()) * 100,
+                     "veto_n": float(t10["vetoed_n"].iloc[0]) if "vetoed_n" in t10 else np.nan,
+                     "pdn_corr": (spearmanr(t10.p, t10.p_dn).correlation if "p_dn" in t10 and t10.p_dn.notna().all() and len(t10) > 3 else np.nan),
                      "ex10": (t10.Gap_T1.mean() - ug) * 100, "gap5": t5.Gap_T1.mean() * 100,
                      "intra5": (t5.close_T1 / t5.open_T1 - 1).mean() * 100,
                      "ret5": (t5.close_T1 / t5.Close - 1).mean() * 100,
@@ -32,6 +39,9 @@ def summarize(W):
     roll = W.set_index("d").ic.rolling(18).mean() if len(W) >= 18 else pd.Series(dtype=float)
     return {"days": len(W), "ic": W.ic.mean(), "ic_neg%": (W.ic < 0).mean() * 100,
             "roll18_min": roll.min() if len(roll) else np.nan,
+            "right_ex": W.right_ex.mean(), "left_ex": W.left_ex.mean(),
+            "veto/day": W.veto_n.mean() if W.veto_n.notna().any() else np.nan,
+            "pdn_corr": W.pdn_corr.mean() if W.pdn_corr.notna().any() else np.nan,
             "ex10": W.ex10.mean(), "lose10%": (W.ex10 < 0).mean() * 100,
             "gap5": W.gap5.mean(), "intra5": W.intra5.mean(), "ret5": W.ret5.mean(),
             "ret5-uni": (W.ret5 - W.uret).mean(), "sec_max10": W.sec_max10.mean()}
@@ -42,14 +52,37 @@ if __name__ == "__main__":
     files = sorted(glob.glob(os.path.join(cfg.OUT_DIR, "eh_*.parquet")))
     if not files: sys.exit("build/eh_*.parquet 없음")
     res = {}
+    dn_path = os.path.join(cfg.OUT_DIR, "eh_dn_ens.parquet")
+    DN = None
+    if os.path.exists(dn_path):
+        DN = pd.read_parquet(dn_path)[["Date", "Ticker", "p"]].rename(columns={"p": "p_dn"}); DN["Date"] = pd.to_datetime(DN.Date)
     for f in files:
         R = pd.read_parquet(f); R["Date"] = pd.to_datetime(R.Date)
         h = os.path.basename(f)[3:-8]          # 파일명 기준 라벨 (eh_mkt_ens → mkt_ens): 같은 hyp 의 LGBM/앙상블 결과가 덮어쓰지 않게
+        if h == "dn_ens":                      # 하강 모델 단독은 순위 지표가 무의미 (p 가 위험도) — IC 만 참고로 반전 계산
+            W = daily(R.assign(p=-R.p)); W["d"] = pd.to_datetime(W.d)
+            res["dn_ens(반전IC)"] = {"full": summarize(W), "post": summarize(W[W.d >= a.split]), "pre": summarize(W[W.d < a.split])}
+            continue
         W = daily(R); W["d"] = pd.to_datetime(W.d)
         res[h] = {"full": summarize(W), "post": summarize(W[W.d >= a.split]), "pre": summarize(W[W.d < a.split])}
+        if DN is not None and h in ("base_ens", "top30_ens"):      # 3차 결합: p_dn 상위 10% 거부 후 재순위 (재학습 없음)
+            M = R.merge(DN, on=["Date", "Ticker"], how="left")
+            keep = M.p_dn.isna() | (M.p_dn < 0.90)
+            M["vetoed_n"] = M.groupby("Date")["rank"].transform(lambda r: int(((r <= 10) & ~keep.loc[r.index]).sum()))
+            V = M[keep].copy(); V["rank"] = V.groupby("Date").p.rank(ascending=False, method="first").astype(int)
+            W = daily(V); W["d"] = pd.to_datetime(W.d)
+            res[h + "+veto"] = {"full": summarize(W), "post": summarize(W[W.d >= a.split]), "pre": summarize(W[W.d < a.split])}
     for per in ["full", "pre", "post"]:
         print(f"\n== {per} ==")
         print(pd.DataFrame({h: v[per] for h, v in res.items()}).T.round(3).to_string())
+    if "base_ens" in res and any(k.endswith("+veto") or k.startswith("top30") for k in res):
+        b = res["base_ens"]; print("\n== 3차 판정 v3 (base_ens 대비) — ①IC≥0.138 ②초과갭≥0.557 ③좌측꼬리초과 ≤ base−1.0 ④우측꼬리초과 ≥ base−1.0 ⑤8/18이후 좌측 < base ==")
+        for h in ["base_ens+veto", "top30_ens", "top30_ens+veto"]:
+            if h not in res: continue
+            v = res[h]; c = [v["full"]["ic"] >= 0.138, v["full"]["ex10"] >= 0.557, v["full"]["left_ex"] <= b["full"]["left_ex"] - 1.0,
+                             v["full"]["right_ex"] >= b["full"]["right_ex"] - 1.0, v["post"]["left_ex"] < b["post"]["left_ex"]]
+            print(f"  {h:15s} " + " · ".join(f"{n}{'O' if x else 'X'}" for n, x in zip("①②③④⑤", c)) + f" → {'채택 후보' if all(c) else '기각'}"
+                  f"  | 거부/일 {v['full'].get('veto/day', float('nan')):.2f} · top10 p↔p_dn {v['full'].get('pdn_corr', float('nan')):+.2f}")
     bases = [h for h in res if h.startswith("base")]
     for bh in bases:
         suf = bh[4:]; b = res[bh]; print(f"\n== 사전 등록 판정 ({bh} 대비, 같은 접미사끼리) ==")
