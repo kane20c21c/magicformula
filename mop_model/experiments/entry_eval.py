@@ -76,10 +76,11 @@ if __name__ == "__main__":
         print(f"\n== {per} ==")
         print(pd.DataFrame({h: v[per] for h, v in res.items()}).T.round(3).to_string())
     if "base_ens" in res and any(k.endswith("+veto") or k.startswith("top30") for k in res):
-        b = res["base_ens"]; print("\n== 3차 판정 v3 (base_ens 대비) — ①IC≥0.138 ②초과갭≥0.557 ③좌측꼬리초과 ≤ base−1.0 ④우측꼬리초과 ≥ base−1.0 ⑤8/18이후 좌측 < base ==")
+        b = res["base_ens"]; print("\n== 3차 판정 v3 (같은 구간의 base_ens 대비) — ①IC ≥ base−0.003 ②초과갭 ≥ base−0.03 ③좌측꼬리초과 ≤ base−1.0 ④우측꼬리초과 ≥ base−1.0 ⑤8/18이후 좌측 < base ==")
+        print("   (①② 허용폭 = 256일 시드 4개 스프레드의 절반. 구간을 2024-09-02~ 로 늘리면서 절대값 0.138/0.557 대신 상대 기준으로 — 2026-09-13)")
         for h in ["base_ens+veto", "top30_ens", "top30_ens+veto"]:
             if h not in res: continue
-            v = res[h]; c = [v["full"]["ic"] >= 0.138, v["full"]["ex10"] >= 0.557, v["full"]["left_ex"] <= b["full"]["left_ex"] - 1.0,
+            v = res[h]; c = [v["full"]["ic"] >= b["full"]["ic"] - 0.003, v["full"]["ex10"] >= b["full"]["ex10"] - 0.03, v["full"]["left_ex"] <= b["full"]["left_ex"] - 1.0,
                              v["full"]["right_ex"] >= b["full"]["right_ex"] - 1.0, v["post"]["left_ex"] < b["post"]["left_ex"]]
             print(f"  {h:15s} " + " · ".join(f"{n}{'O' if x else 'X'}" for n, x in zip("①②③④⑤", c)) + f" → {'채택 후보' if all(c) else '기각'}"
                   f"  | 거부/일 {v['full'].get('veto/day', float('nan')):.2f} · top10 p↔p_dn {v['full'].get('pdn_corr', float('nan')):+.2f}")

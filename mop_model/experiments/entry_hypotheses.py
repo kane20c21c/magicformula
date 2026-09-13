@@ -42,7 +42,9 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
            결과 parquet 의 p 는 "큰 개별 갭다운" 가능성의 그날 백분위 (entry_eval 이 p_dn 으로 결합).
   결합(재학습 없음, entry_eval.py): 그날 p_dn ≥ 0.90 (상위 10%, ≈20종목) 을 후보에서 제외하고 p 순으로 재순위.
            비교표 = base / base+거부권 / top30 / top30+거부권 → 거부권 효과와 타깃 교체 효과 분리.
-3차 판정 기준 (v3, 사전 등록): ① 전구간 IC ≥ 0.138 (시드 하한) ② rank≤10 초과갭 ≥ 0.557%p (시드 하한)
+  ⚠ 3차 채점 구간 = **2024-09-02 ~ 2026-09-10 (약 500일)** — 케인 지적(1년은 짧다). 학습 시작 2023-05 라 첫 재학습에
+    15개월 학습. base 도 같은 구간으로 다시 돌린다 (eh_base_ens.parquet 덮어씀 — 256일 결과는 eh_base_s*_ens 에 남음).
+3차 판정 기준 (v3, 사전 등록): ① 전구간 IC ≥ 같은 구간 base − 0.003 ② rank≤10 초과갭 ≥ base − 0.03%p (256일 시드 스프레드 절반)
   ③ 전구간 좌측 꼬리 초과(top10 <−2% 비율 − 유니버스) ≤ base − 1.0%p ④ 전구간 우측 꼬리 초과 ≥ base − 1.0%p
   ⑤ 8/18 이후 좌측 꼬리 초과 < base. 다섯 개 전부. 보조 지표(판정 아님): top10 내 p↔p_dn 상관, 일평균 거부 종목 수
   (거부가 0~1개면 p_dn 이 p 의 거울상이라 무용, 2~3개인데 좌측이 줄면 다른 것을 배운 것).
@@ -66,8 +68,8 @@ entry_hypotheses.py — 진입 신호 개선 가설 3종 워크포워드 (검증
   python3 entry_hypotheses.py --hyp yz     --start 2025-08-25 --end 2026-09-10   # 2차
   python3 entry_hypotheses.py --hyp opt    --start 2025-08-25 --end 2026-09-10   # 2차 (gauge_daily 동기화 필요)
   python3 entry_hypotheses.py --hyp yzopt  --start 2025-08-25 --end 2026-09-10   # 2차
-  python3 entry_hypotheses.py --hyp top30  --start 2025-08-25 --end 2026-09-10 --out ../build/eh_top30_ens.parquet   # 3차
-  python3 entry_hypotheses.py --hyp dn     --start 2025-08-25 --end 2026-09-10 --out ../build/eh_dn_ens.parquet      # 3차
+  # 3차 (2년 구간, base 포함 3회 · 앙상블 각 ~37분)
+  for h in base top30 dn; do python3 entry_hypotheses.py --hyp $h --start 2024-09-02 --end 2026-09-10 --out ../build/eh_${h}_ens.parquet; done
   (스모크: --start 2026-08-01 --end 2026-08-10 --no-ensemble  ≈ 2~3분)
   결과: build/eh_<hyp>.parquet · 로그는 stdout → tee build/eh_<hyp>.log
   ⚠ features.parquet 이 --end 다음 거래일까지 있어야 한다 (Gap_T1 라벨).
