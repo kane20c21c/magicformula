@@ -189,12 +189,15 @@ def add_sector_target(d):
     return d
 
 
-def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=True, seed=None, shuffle_cols=False):
+def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=True, seed=None, shuffle_cols=False, threads=None):
     """seed / shuffle_cols: 잡음 바닥 측정용 (2026-09-13 케인 질문 "피처 순서가 결과를 바꾸나").
     seed 는 LGBM random_state·CatBoost random_seed 를 함께 바꾼다(피처 서브샘플 colsample_bytree=0.7 의 추첨이 달라짐).
     shuffle_cols 는 피처 열 순서만 섞는다 — 같은 seed 에서도 추첨·동률 분할 선택이 달라지므로 순서 효과를 따로 잰다."""
     if seed is not None:
         cfg.LGBM_PARAMS["random_state"] = int(seed); cfg.CAT_PARAMS["random_seed"] = int(seed)
+    if threads:   # 병렬도만 (모델 수학 아님 — 튜닝 금지 대상 아님). 운영 config 는 4 고정, 연구 실행에서만 M4 에어 10코어 활용
+        cfg.LGBM_PARAMS["n_jobs"] = int(threads); cfg.CAT_PARAMS["thread_count"] = int(threads)
+        print(f"[threads] LGBM n_jobs={threads} · CatBoost thread_count={threads}", flush=True)
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
     d["Date"] = pd.to_datetime(d.Date)
     cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
@@ -268,6 +271,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None)
     ap.add_argument("--seed", type=int, default=None, help="LGBM/CatBoost 난수 시드 (기본 config 42)")
     ap.add_argument("--shuffle-cols", action="store_true", help="피처 열 순서 셔플 (순서 효과 측정)")
+    ap.add_argument("--threads", type=int, default=None, help="LGBM/CatBoost 스레드 (기본 config 4; M4 에어는 8 권장)")
     a = ap.parse_args()
     out = a.out or os.path.join(cfg.OUT_DIR, f"eh_{a.hyp}.parquet")
-    run(a.hyp, a.start, a.end, out, a.retrain_every, not a.no_ensemble, a.seed, a.shuffle_cols)
+    run(a.hyp, a.start, a.end, out, a.retrain_every, not a.no_ensemble, a.seed, a.shuffle_cols, a.threads)
