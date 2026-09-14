@@ -35,6 +35,23 @@ intraday_eval.py — "장중 오르는 종목 고르기" 새 전략의 1단계 �
   다음 수는 새 정보원(08:50 신호: 미국 마감·야간선물·NXT 프리마켓)뿐.
   보조 지표(판정 아님): 좌측 꼬리(top10 중 −3% 이하 비율 − 유니버스), 우측 꼬리(+3% 이상), top10 섹터 집중, 8/4 이후 구간.
 
+1단계 결과 (2026-09-14, 케인 에어 실행): intra_base IC 0.123 · 비용후 +0.19 / intra_plus 0.126 · +0.255 / 시드7 0.126 · +0.216
+  / 단순규칙 0.022 · −0.084 → 넷 다 통과. 좌측 꼬리 −7.6~−8.0%p(안 빠지는 종목 선별), 우측 −1~−1.7. +5피처 효과는 시드 잡음 1.5배.
+
+2차 가설 (2026-09-14 케인 승인 — "모델 계열이 병목인가" 진단 + 이진 타깃이 버리는 '크기' 정보 회복. 전부 153피처(plus) 고정):
+  ridge_plus : 릿지 회귀 (alpha 10 고정, 표준화, 결손은 학습구간 중앙값). 타깃 y_pct(아래). **진단용** —
+               GBDT 와의 IC 차이가 비선형이 주는 전부. 채택 대상 아님.
+  reg_plus   : 연속 타깃 y_pct = 그날 장중 수익률의 유니버스 백분위(0~1) 를 LGBM(l2) + CatBoost(RMSE) 로 회귀.
+               "많이 오르는" 을 상위30% 로 조이는 대신 크기 정보를 그대로 쓰는 정직한 방법.
+               (상위30% 는 고변동 종목이 양성일 확률이 가장 높은데 그 집단의 평균 장중이 가장 나빠 — 저 +0.06 / 고 −0.09 —
+                9/13 데이포트 top30 과 같은 변동성 선택기 함정. 사전 분석으로 기각, 돌리지 않음.)
+  rank_plus  : LambdaRank — 그날(query) 안의 순서를 직접 최적화. 라벨 = 장중 백분위 10등급(0~9, 선형 gain).
+               LGBM lambdarank(ndcg@10 조기종료) + CatBoost YetiRank, 순위평균 앙상블.
+  2차 판정 (사전 등록, 비교 대상 intra_plus 앙상블 = IC 0.126 · top10 비용후 +0.255 · 좌측 −7.6):
+    ridge_plus : 판정 없음. IC ≥ 0.106 (plus − 0.02) 이면 "모델 계열은 병목 아님" 으로 기록.
+    reg_plus / rank_plus 채택 = ① IC ≥ 0.123 ② top10 비용후 ≥ 0.295 (plus + 시드 스프레드 0.04 — 진짜 개선) ③ 좌측 꼬리 ≤ −6.6
+    셋 다 아니면 이진 타깃(intra_plus) 유지 — 같으면 단순한 쪽.
+
 사용 (맥 로컬에서 — VM 아님):
   cd MagicFormula/mop_model/experiments
   python3 intraday_eval.py run --hyp intra_base --start 2024-09-02 --end 2026-09-10 --threads 8 | tee ../build/id_intra_base.log
@@ -42,6 +59,8 @@ intraday_eval.py — "장중 오르는 종목 고르기" 새 전략의 1단계 �
   python3 intraday_eval.py run --hyp intra_plus --start 2024-09-02 --end 2026-09-10 --threads 8 --seed 7 --out ../build/id_intra_plus_s7.parquet
   python3 intraday_eval.py eval                                   # build/id_*.parquet 전부 비교 + 판정
   (스모크: run --hyp intra_plus --start 2026-08-01 --end 2026-08-05 --no-ensemble  ≈ 1~2분)
+  # 2차 (ridge 수 분, reg/rank 각 ~35분) — 끝나면 eval 이 2차 판정표를 같이 찍는다
+  for h in ridge_plus reg_plus rank_plus; do python3 intraday_eval.py run --hyp $h --start 2024-09-02 --end 2026-09-10 --threads 8 | tee ../build/id_${h}.log; done
   ⚠ features.parquet 이 --end 다음 거래일까지 있어야 한다 (C2C_T1·Gap_T1 라벨). 결과: build/id_<hyp>[_sN].parquet
 """
 import argparse, glob, os, sys, time, json
@@ -59,6 +78,85 @@ COST_RT = 0.23          # 왕복 비용 % (라이브 조건: 수수료+세금)
 TAIL = 3.0              # 꼬리 정의 |장중| ≥ 3%
 INTRA_COLS = ["id20", "id_up20", "id1", "gd20", "gshare20"]
 GATE = dict(ic=0.08, neg_pct=45.0)
+# 2차 판정 상수 (intra_plus 1단계 실측 기준 — 결과 보고 바꾸지 않는다)
+GATE2 = dict(ridge_ic=0.106, ic=0.123, net=0.295, left=-6.6)
+RIDGE_ALPHA = 10.0
+RANK_GRADES = 10
+
+
+def _valid_split(tr, frac=0.85):
+    days = np.sort(tr.Date.unique()); cut = days[int(len(days) * frac)]
+    return tr[tr.Date < cut], tr[tr.Date >= cut]
+
+
+def _rank_ens(a, b, index):
+    r1 = pd.Series(a, index=index).rank(pct=True)
+    if b is None: return r1
+    return (r1 + pd.Series(b, index=index).rank(pct=True)) / 2.0
+
+
+def fit_predict_ridge(train_df, score_df, cols, target):
+    """릿지 회귀 진단 기준선. 결손 → 학습구간 중앙값, 표준화, alpha 고정."""
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+    tr = train_df.dropna(subset=[target])
+    med = tr[cols].median()
+    X = tr[cols].fillna(med); sc = StandardScaler().fit(X)
+    m = Ridge(alpha=RIDGE_ALPHA).fit(sc.transform(X), tr[target])
+    s = m.predict(sc.transform(score_df[cols].fillna(med)))
+    return pd.Series(s, index=score_df.index), {"train_rows": int(len(tr)), "train_first_date": str(pd.Timestamp(tr.Date.min()).date()), "n_features": len(cols)}
+
+
+def fit_predict_reg(train_df, score_df, cols, target, use_ensemble=True):
+    """연속 타깃 회귀 — LGBM(l2) + CatBoost(RMSE), 순위평균 앙상블. 하이퍼파라미터는 config 그대로(objective 만 교체)."""
+    import lightgbm as lgb
+    tr = train_df.dropna(subset=[target]); TRf, VAf = _valid_split(tr)
+    prm = {**cfg.LGBM_PARAMS, "objective": "regression"}
+    m = lgb.LGBMRegressor(**prm)
+    m.fit(TRf[cols], TRf[target], eval_set=[(VAf[cols], VAf[target])], eval_metric="l2",
+          callbacks=[lgb.early_stopping(cfg.LGBM_EARLY_STOP, verbose=False)])
+    p1 = m.predict(score_df[cols]); meta = {"train_rows": int(len(tr)), "train_first_date": str(pd.Timestamp(tr.Date.min()).date()),
+                                          "n_features": len(cols), "lgbm_best_iter": int(m.best_iteration_ or 0)}
+    p2 = None
+    if use_ensemble:
+        try:
+            from catboost import CatBoostRegressor
+            cp = {**cfg.CAT_PARAMS, "loss_function": "RMSE", "eval_metric": "RMSE"}
+            cb = CatBoostRegressor(early_stopping_rounds=cfg.CAT_EARLY_STOP, **cp)
+            cb.fit(TRf[cols].fillna(cfg.CAT_NAN), TRf[target], eval_set=(VAf[cols].fillna(cfg.CAT_NAN), VAf[target]), verbose=False)
+            p2 = cb.predict(score_df[cols].fillna(cfg.CAT_NAN)); meta["cat_best_iter"] = int(cb.get_best_iteration())
+        except Exception as e:
+            print(f"  [reg] CatBoost 생략: {e}", flush=True)
+    meta["ensemble"] = p2 is not None
+    return _rank_ens(p1, p2, score_df.index), meta
+
+
+def fit_predict_rank(train_df, score_df, cols, target, use_ensemble=True):
+    """LambdaRank — query = 날짜. 라벨 = 그날 백분위 10등급(int 0~9), gain 선형. LGBM ndcg@10 조기종료 + CatBoost YetiRank."""
+    import lightgbm as lgb
+    tr = train_df.dropna(subset=[target]).sort_values(["Date", "Ticker"]); TRf, VAf = _valid_split(tr)
+    lab = lambda d: np.minimum((d[target] * RANK_GRADES).astype(int), RANK_GRADES - 1)
+    grp = lambda d: d.groupby("Date", sort=False).size().values
+    prm = {**cfg.LGBM_PARAMS, "objective": "lambdarank", "label_gain": list(range(RANK_GRADES))}
+    m = lgb.LGBMRanker(**prm)
+    m.fit(TRf[cols], lab(TRf), group=grp(TRf), eval_set=[(VAf[cols], lab(VAf))], eval_group=[grp(VAf)], eval_metric="ndcg", eval_at=[10],
+          callbacks=[lgb.early_stopping(cfg.LGBM_EARLY_STOP, verbose=False)])
+    p1 = m.predict(score_df[cols]); meta = {"train_rows": int(len(tr)), "train_first_date": str(pd.Timestamp(tr.Date.min()).date()),
+                                          "n_features": len(cols), "lgbm_best_iter": int(m.best_iteration_ or 0)}
+    p2 = None
+    if use_ensemble:
+        try:
+            from catboost import CatBoostRanker, Pool
+            cp = {k: v for k, v in cfg.CAT_PARAMS.items() if k not in ("loss_function", "eval_metric")}
+            cb = CatBoostRanker(loss_function="YetiRank", early_stopping_rounds=cfg.CAT_EARLY_STOP, **cp)
+            gid = lambda d: d.Date.astype("int64").values
+            cb.fit(Pool(TRf[cols].fillna(cfg.CAT_NAN), lab(TRf), group_id=gid(TRf)),
+                   eval_set=Pool(VAf[cols].fillna(cfg.CAT_NAN), lab(VAf), group_id=gid(VAf)), verbose=False)
+            p2 = cb.predict(score_df[cols].fillna(cfg.CAT_NAN)); meta["cat_best_iter"] = int(cb.get_best_iteration())
+        except Exception as e:
+            print(f"  [rank] CatBoost 생략: {e}", flush=True)
+    meta["ensemble"] = p2 is not None
+    return _rank_ens(p1, p2, score_df.index), meta
 
 
 def add_intra_target(d):
@@ -67,6 +165,7 @@ def add_intra_target(d):
     d["intra_T1"] = (1.0 + d.C2C_T1) / (1.0 + d.Gap_T1) - 1.0
     med = d.groupby("Date").intra_T1.transform("median")
     d["y_intra"] = np.where(d.intra_T1.isna() | med.isna(), np.nan, (d.intra_T1 > med).astype(float))
+    d["y_pct"] = d.groupby("Date").intra_T1.rank(pct=True)          # 연속 타깃: 그날 백분위 (0,1]
     return d
 
 
@@ -97,10 +196,14 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
     d["Date"] = pd.to_datetime(d.Date)
     cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
     d = add_intra_target(d)
-    if hyp == "intra_plus":
+    if hyp != "intra_base":
         d = add_intra_feats(d); cols = cols + INTRA_COLS
     d = d.sort_values(["Date", "Ticker"]).reset_index(drop=True)
-    target = "y_intra"
+    target = "y_intra" if hyp in ("intra_base", "intra_plus") else "y_pct"
+    fitter = {"ridge_plus": lambda tr, sc, c: fit_predict_ridge(tr, sc, c, target),
+              "reg_plus": lambda tr, sc, c: fit_predict_reg(tr, sc, c, target, use_ensemble),
+              "rank_plus": lambda tr, sc, c: fit_predict_rank(tr, sc, c, target, use_ensemble),
+              }.get(hyp, lambda tr, sc, c: fit_predict(tr, sc, c, target=target, use_ensemble=use_ensemble, return_meta=True))
     print(f"[{hyp}] y_intra 양성률 {d.y_intra.mean():.3f} · 장중 라벨 결손율 {d.intra_T1.isna().mean():.4f}", flush=True)
 
     alldays = np.sort(d.Date.unique())
@@ -115,13 +218,13 @@ def run(hyp, start, end, out_path, retrain_every=RETRAIN_EVERY, use_ensemble=Tru
         if i % retrain_every == 0:
             train = d[d.Date <= prv[t]].dropna(subset=[target])
             score_block = d[d.Date.isin(days[i:i + retrain_every])]
-            s, meta = fit_predict(train, score_block, cols, target=target, use_ensemble=use_ensemble, return_meta=True)
+            s, meta = fitter(train, score_block, cols)
             model_s = pd.Series(s.values, index=score_block.index)
             print(f"  [{i+1:3d}/{len(days)}] 재학습 {pd.Timestamp(t).date()} train={meta['train_rows']} "
                   f"({meta['train_first_date']}~) lgbm_auc={meta.get('lgbm_valid_auc')} cat_auc={meta.get('cat_valid_auc')} "
-                  f"경과 {(time.time()-t0)/60:.1f}분", flush=True)
+                  f"iter={meta.get('lgbm_best_iter')}/{meta.get('cat_best_iter')} 경과 {(time.time()-t0)/60:.1f}분", flush=True)
         cur = d[d.Date == t]
-        keep = ["Date", "Ticker", "sector_top", "Gap_T1", "intra_T1", "y_intra", "Close"] + (["id_up20"] if hyp == "intra_plus" else [])
+        keep = ["Date", "Ticker", "sector_top", "Gap_T1", "intra_T1", "y_intra", "Close"] + (["id_up20"] if hyp != "intra_base" else [])
         r = cur[keep].copy()
         r["p"] = model_s.reindex(cur.index).rank(pct=True).values
         r["rank"] = (-r.p).rank(method="first").astype(int)
@@ -187,13 +290,26 @@ def evaluate(split="2026-08-04"):
         print(f"  {h:18s} " + " · ".join(f"{n}{'O' if x else 'X'}" for n, x in zip("①②③④", c))
               + f" → {'2단계 진행' if all(c) else '기각'}  | IC {F['ic']:+.4f}±{F['ic_se']:.4f} · top10 비용후 {F['top10_net']:+.3f}%/일 · 규칙 {rule_net:+.3f}")
     print("  참고: 시드 잡음 = 같은 hyp 의 _sN 결과 간 IC·top10_net 스프레드. 그 안에 든 차이는 차이가 아니다.")
+    # ── 2차 판정 (intra_plus 1단계 실측 대비, 사전 등록 상수 GATE2)
+    if any(h in res for h in ("ridge_plus", "reg_plus", "rank_plus")):
+        print(f"\n== 2차 판정 (intra_plus 기준: IC 0.126 · 비용후 +0.255 · 좌측 −7.6) ==")
+        if "ridge_plus" in res:
+            F = res["ridge_plus"]["full"]; ok = F["ic"] >= GATE2["ridge_ic"]
+            print(f"  ridge_plus (진단)  IC {F['ic']:+.4f}±{F['ic_se']:.4f} · 비용후 {F['top10_net']:+.3f} → "
+                  f"{'모델 계열은 병목 아님 (비선형 이득 ≤ 0.02)' if ok else '비선형 이득 큼 — 모델 쪽에 여지 있음'}")
+        for h in ("reg_plus", "rank_plus"):
+            if h not in res: continue
+            F = res[h]["full"]
+            c = [F["ic"] >= GATE2["ic"], F["top10_net"] >= GATE2["net"], F["left_ex"] <= GATE2["left"]]
+            print(f"  {h:12s} ①IC≥{GATE2['ic']} {'O' if c[0] else 'X'} · ②비용후≥{GATE2['net']} {'O' if c[1] else 'X'} · ③좌측≤{GATE2['left']} {'O' if c[2] else 'X'}"
+                  f" → {'채택 후보 (이진 타깃 대체)' if all(c) else '기각 — 이진 타깃 유지'}  | IC {F['ic']:+.4f} · 비용후 {F['top10_net']:+.3f} · 좌측 {F['left_ex']:+.2f} · 우측 {F['right_ex']:+.2f}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("--hyp", required=True, choices=["intra_base", "intra_plus"])
+    r.add_argument("--hyp", required=True, choices=["intra_base", "intra_plus", "ridge_plus", "reg_plus", "rank_plus"])
     r.add_argument("--start", required=True); r.add_argument("--end", required=True)
     r.add_argument("--retrain-every", type=int, default=RETRAIN_EVERY)
     r.add_argument("--no-ensemble", action="store_true"); r.add_argument("--out", default=None)
