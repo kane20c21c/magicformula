@@ -22,6 +22,11 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   python3 run_daily.py                    # 기존 features 로 신호만
   python3 run_daily.py --date 2026-07-24
   python3 run_daily.py --lgbm-only        # 속도(단독)
+  python3 run_daily.py --target y_intra --signal-dir output/signals_white   # 화이트포트 (2026-09-15)
+
+★ 화이트포트(--target y_intra): 같은 features.parquet 에 intra.py 의 타깃·5피처를 얹어
+  "익일 시가→종가가 그날 중앙값보다 큰가" 를 학습한다. 신호는 별도 디렉터리에만 쓴다 —
+  데이포트 경로(output/signals)·기본 동작은 옵션을 안 주면 전과 같다.
 """
 import argparse, json, os, time
 from datetime import datetime, timezone, timedelta
@@ -29,6 +34,7 @@ from datetime import datetime, timezone, timedelta
 import numpy as np, pandas as pd
 import config as cfg
 from model import fit_predict
+import intra
 
 KST = timezone(timedelta(hours=9))
 
@@ -44,10 +50,25 @@ def _num(x):
     return None if np.isnan(f) else f
 
 
+# 타깃별 신호 프로필 — 데이포트(y_rel)는 기존 상수 그대로, 화이트포트(y_intra)만 추가.
+PROFILES = {
+    cfg.TARGET: dict(name="데이 포트", top_k=cfg.TOP_K, strategy_id=cfg.STRATEGY_ID,
+                     model_version=cfg.MODEL_VERSION, signal_dir=cfg.SIGNAL_DIR),
+    intra.TARGET_INTRA: dict(name="화이트 포트", top_k=10, strategy_id="white_ml_top10",
+                             model_version="intra_plus-v1", signal_dir=cfg.SIGNAL_DIR + "_white"),
+}
+
+
 def signal(today=None, use_ensemble=True, target=None, top_k=None,
-           rebuild=False, save=True):
+           rebuild=False, save=True, signal_dir=None):
     target = target or cfg.TARGET
-    top_k = top_k or cfg.TOP_K
+    if target not in PROFILES:
+        raise SystemExit(f"--target {target}: 지원 안 함 ({', '.join(PROFILES)})")
+    prof = PROFILES[target]
+    top_k = top_k or prof["top_k"]
+    signal_dir = signal_dir or prof["signal_dir"]
+    if not os.path.isabs(signal_dir):            # CLI 상대경로는 mop_model 기준 (launchd cwd 무관)
+        signal_dir = os.path.join(cfg.BASE_DIR, signal_dir)
     t0 = time.time()
 
     if rebuild:
@@ -58,6 +79,8 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
 
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
     cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
+    if target == intra.TARGET_INTRA:
+        d, cols = intra.prepare_intra(d, cols)
     days = np.sort(d.Date.unique())
     today = pd.Timestamp(today) if today else pd.Timestamp(days[-1])
     prior = days[days < np.datetime64(today)]
@@ -88,8 +111,9 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
 
     doc = {
         "schema_version": cfg.SCHEMA_VERSION,
-        "strategy_id": cfg.STRATEGY_ID,
-        "model_version": cfg.MODEL_VERSION,
+        "strategy_id": prof["strategy_id"],
+        "model_version": prof["model_version"],
+        "target": target,
         "as_of": str(today.date()),
         "generated_at": datetime.now(KST).isoformat(timespec="seconds"),
         "top_k": int(top_k),
@@ -99,16 +123,16 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
     }
 
     if save:
-        os.makedirs(cfg.SIGNAL_DIR, exist_ok=True)
-        out = os.path.join(cfg.SIGNAL_DIR, f"signal_{today.date()}.json")
+        os.makedirs(signal_dir, exist_ok=True)
+        out = os.path.join(signal_dir, f"signal_{today.date()}.json")
         with open(out, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=1)
-        latest = os.path.join(cfg.SIGNAL_DIR, "signal_latest.json")
+        latest = os.path.join(signal_dir, "signal_latest.json")
         with open(latest, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=1)
         print(f"[signal] → {out}")
 
-    print(f"\n=== {today.date()} 매수 신호 (Top{top_k}) — 데이 포트 ===")
+    print(f"\n=== {today.date()} 매수 신호 (Top{top_k}) — {prof['name']} ===")
     print(f"{'순위':>3} {'종목':<14} {'섹터':<10} {'종가':>10} {'점수':>7}")
     for r in ranking[:top_k]:
         cl = f"{r['close']:,.0f}" if r["close"] is not None else "-"
@@ -125,6 +149,8 @@ if __name__ == "__main__":
     ap.add_argument("--lgbm-only", action="store_true")
     ap.add_argument("--rebuild", action="store_true", help="panel/features 재생성 후 신호")
     ap.add_argument("--no-save", action="store_true")
+    ap.add_argument("--target", default=None, help="y_rel(기본, 데이포트) | y_intra(화이트포트)")
+    ap.add_argument("--signal-dir", default=None, help="신호 JSON 디렉터리 (기본: 타깃별 프로필)")
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
@@ -152,5 +178,5 @@ if __name__ == "__main__":
             print(f"[mop-signal] ⚠️ 휴장일 체크 실패({type(_e).__name__}: {_e}) "
                   f"— 가드 없이 계속 진행", file=_sys.stderr)
 
-    signal(today=a.date, use_ensemble=not a.lgbm_only,
-           rebuild=a.rebuild, save=not a.no_save)
+    signal(today=a.date, use_ensemble=not a.lgbm_only, target=a.target,
+           rebuild=a.rebuild, save=not a.no_save, signal_dir=a.signal_dir)
