@@ -51,6 +51,7 @@ cd src
 python3 run_daily.py --rebuild        # 운영 (panel→features→학습→신호). 실측 약 90초
 python3 run_daily.py                  # 기존 features 로 신호만
 python3 run_daily.py --date 2026-07-24
+python3 run_daily.py --target y_intra  # 화이트 포트 신호 (2026-09-15) → output/signals_white/. 데이 포트 경로 불변
 python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테스트
 ```
 
@@ -59,6 +60,9 @@ python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테�
 ## 산출물
 
 `output/signals/signal_YYYY-MM-DD.json` (+ `signal_latest.json`)
+— 화이트 포트(`--target y_intra`)는 `output/signals_white/` 에 같은 스키마로 (`strategy_id` white_ml_top10,
+`model_version` intra_plus-v1, `target` 필드 추가, top_k 10, 153피처). 타깃·5피처 정의 = `src/intra.py`
+(사전 등록 실험 `experiments/intraday_eval.py` 와 동일 — `tests/test_intra_signal.py` 가 보증).
 
 ```json
 {"schema_version":"1.0","strategy_id":"mop_ml_top5","as_of":"2026-07-24",
@@ -183,6 +187,7 @@ Kane 지정 섹터 세트별 갭1 상대 상승확률의 **지정 가중평균**
 | Label | 시각 | 호출 |
 |---|---|---|
 | `com.kane.magicformula-mop-signal` | 매일 16:20 | `src/run_daily.py --rebuild` |
+| (체인 9단계 `magicformula-white-signal`) | 평일 19:00 체인, 2단계 직후 | `src/run_daily.py --target y_intra` (features 재사용) |
 | `com.kane.magicformula-mop-gauge` | 매일 15:10 | `src/run_gauge.py` (휴장일 자체 판정 종료) |
 
 정본 plist 는 `configs/launchd/` — 운영본은 `~/Library/LaunchAgents/` 로 symlink.
