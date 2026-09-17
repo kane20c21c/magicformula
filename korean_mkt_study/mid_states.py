@@ -135,7 +135,8 @@ def build_states(quick):
 # ───────────────────────── 통계 ─────────────────────────
 def stats(sub, N=10):
     lab, rp = sub[f"lab{N}"], sub[f"rpath{N}"]
-    return dict(n=len(sub), n_days=sub.date.nunique(), p_up=(lab == 1).mean(), p_dn=(lab == -1).mean(),
+    p_up, p_dn = (lab == 1).mean(), (lab == -1).mean()
+    return dict(n=len(sub), n_days=sub.date.nunique(), p_up=p_up, p_dn=p_dn, spread=p_up - p_dn,
                 p_vert=(lab == 0).mean(), mean_rpath=rp.mean(), mean_rraw=sub[f"rraw{N}"].mean())
 
 
