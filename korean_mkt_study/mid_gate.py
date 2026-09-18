@@ -40,8 +40,9 @@ DATA = HERE / "data_ext"
 FLOW = HERE / "data" / "investor_flow.parquet"
 OUT = HERE / "out" / "mid"
 
-START, END = "2014-01-01", "2026-06-30"       # 수급 시작 ~ 거래량 원천 이음새(KRX→KRX+NXT)
+START, END = "2014-01-01", "2026-09-11"       # 수급 시작 ~ 백필 끝 (backfill_prices_krx.py, KRX 단독 거래량으로 통일)
 EVAL_START = "2015-01-02"
+FLOW_END = "2026-06-30"                       # investor_flow 는 KRX 차단으로 여기서 멈춤 — 수급 피처는 그 이후 결측
 MA_KINDS = ["sma", "ema", "wma", "dema", "evwma"]
 MA_P = [5, 20, 60, 120, 200]
 NS = [5, 10, 20]
@@ -311,7 +312,7 @@ def main():
     log(f"wide {C.shape}  {dates[0].date()}~{dates[-1].date()}  ({time.time()-t0:.0f}s)")
 
     masks_df = build_masks(W, mktcap, foreign, managed, static)
-    common = C.rolling(200, min_periods=200).mean().notna() & fw["외국인"].rolling(60, min_periods=60).sum().notna()
+    common = C.rolling(200, min_periods=200).mean().notna()          # MA200 워밍업만 공통 조건 (수급은 6/30 이후 결측이라 제외)
     ev = pd.Series(dates >= ("2023-01-01" if a.quick else EVAL_START), index=dates)
     masks = {L: (m & common & bcast_rows(ev, C)).to_numpy() for L, m in masks_df.items()}
     for L, mk in masks.items():

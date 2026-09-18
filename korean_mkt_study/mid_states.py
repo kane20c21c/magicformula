@@ -68,7 +68,7 @@ def build_states(quick):
     dates = C.index
     masks_df = g.build_masks(W, mktcap, foreign, managed, static)
     base = masks_df["all"]
-    common = C.rolling(200, min_periods=200).mean().notna() & fw["외국인"].rolling(60, min_periods=60).sum().notna()
+    common = C.rolling(200, min_periods=200).mean().notna()          # 수급 조건 제외 (investor_flow 6/30 종료)
     ev = pd.Series(dates >= ("2023-01-01" if quick else g.EVAL_START), index=dates)
     mask = (base & common & g.bcast_rows(ev, C)).to_numpy()
     g.log(f"wide {C.shape}")

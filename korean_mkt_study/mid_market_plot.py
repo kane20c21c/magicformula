@@ -51,12 +51,23 @@ def panel(ax, axr, s, title):
         sp.set_visible(False)
 
 
-def main():
+def kospi200_series():
+    """2023-01~ 는 우리 데이터의 TIGER200(LLV 102110), 그 이전은 FDR KS200 지수를 2023-01-02 종가 비율로 이어붙임(연구 대조용)."""
+    llv = pd.read_parquet(Path.home() / "Dev/StoLab/LongLiveVault/data/ohlcv/panel.parquet")
+    etf = llv[llv.Ticker.astype(str) == "102110"].set_index("Date")["Close"].astype(float).sort_index()
+    etf.index = pd.to_datetime(etf.index)
     k = pd.read_parquet(g.DATA / "kospi200_daily.parquet")["Close"].astype(float)
     k.index = pd.to_datetime(k.index)
-    k = k[(k.index >= "2013-06-01") & (k.index <= "2026-09-11")]
+    k = k[k.index < etf.index[0]]
+    ratio = etf.iloc[0] / pd.read_parquet(g.DATA / "kospi200_daily.parquet")["Close"].astype(float).reindex([etf.index[0]]).iloc[0]
+    return pd.concat([k * ratio, etf]), etf.index[0]
+
+
+def main():
+    k, splice = kospi200_series()
+    k = k[(k.index >= "2014-01-01") & (k.index <= g.END)]
     u = universe_index()
-    lo, hi = "2014-01-01", "2026-06-30"
+    lo, hi = "2014-01-01", g.END
     fig = plt.figure(figsize=(16, 12))
     gs = fig.add_gridspec(5, 1, height_ratios=[5, 0.35, 0.9, 5, 0.35], hspace=0.05)
     axes = [fig.add_subplot(gs[0]), fig.add_subplot(gs[1]), fig.add_subplot(gs[3]), fig.add_subplot(gs[4])]
@@ -64,8 +75,8 @@ def main():
         ax.sharex(axes[0])
     for ax in axes[:3]:
         ax.tick_params(labelbottom=False)
-    panel(axes[0], axes[1], k[k.index >= "2014-01-01"], "KOSPI200 (일간, FinanceDataReader) — 2014-01 ~ 2026-09")
-    panel(axes[2], axes[3], u[(u.index >= lo) & (u.index <= hi)], "우리 유니버스 시총가중 지수 (all 계층, 2014-01=100) — 2014-01 ~ 2026-06")
+    panel(axes[0], axes[1], k, f"KOSPI200 — {splice.date()}~ TIGER200(LLV 102110), 이전은 FDR 지수 접합 — 2014-01 ~ {g.END}")
+    panel(axes[2], axes[3], u[(u.index >= lo) & (u.index <= hi)], f"우리 유니버스 시총가중 지수 (all 계층, 2014-01=100) — 2014-01 ~ {g.END}")
     axes[3].xaxis.set_major_locator(mdates.YearLocator()); axes[3].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in REG.values()]
     fig.legend(handles, list(REG.keys()), loc="lower center", ncol=4, fontsize=9, frameon=False, bbox_to_anchor=(0.5, 0.005))
