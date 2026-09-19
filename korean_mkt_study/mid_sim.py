@@ -55,7 +55,8 @@ def labels_with_hold(W):
     return (np.where(valid, r_path, np.nan), np.where(valid, h, np.nan), np.where(valid, lab, np.nan), en, C.to_numpy())
 
 
-def simulate(sig, dates, close, tick_idx, en_arr, nav0=1.0):
+def simulate(sig, dates, close, tick_idx, en_arr, nav0=1.0, slots=SLOTS, stop_slip=0.0):
+    """slots: 슬롯 수, stop_slip: 하단 배리어 청산(lab=-1) 에 추가되는 슬리피지(수익률 차감)."""
     """sig: DataFrame[date, ticker, di(날짜 idx), ti(종목 idx), prio, gap5n, r_path, h] — 신호일 기준.
     반환: nav Series(일별), trades DataFrame."""
     by_day = {k: v.sort_values(["prio", "key"]) for k, v in sig.groupby("di")}
@@ -66,10 +67,11 @@ def simulate(sig, dates, close, tick_idx, en_arr, nav0=1.0):
         keep = []
         for p in pos:
             if p["exit_di"] == t:
-                val = p["size"] * (1 + p["r_path"]) * (1 - COST / 2)
+                rp = p["r_path"] - (stop_slip if p.get("lab") == -1 else 0.0)
+                val = p["size"] * (1 + rp) * (1 - COST / 2)
                 cash += val
                 trades.append(dict(rule=p["rule"], ticker=p["ticker"], signal=dates[p["sig_di"]], entry=dates[p["entry_di"]], exit=dates[t],
-                                   h=p["h"], r_gross=p["r_path"], r_net=(1 + p["r_path"]) * (1 - COST) - 1, size=p["size"]))
+                                   h=p["h"], r_gross=rp, r_net=(1 + rp) * (1 - COST) - 1, size=p["size"]))
             else:
                 keep.append(p)
         pos = keep
@@ -77,16 +79,16 @@ def simulate(sig, dates, close, tick_idx, en_arr, nav0=1.0):
         if t in by_day and t + 1 < T:
             held = {p["ticker"] for p in pos}
             nav_now = cash + sum(p["size"] * close[t, p["ti"]] / en_arr[p["sig_di"], p["ti"]] for p in pos if not np.isnan(close[t, p["ti"]]))
-            unit = nav_now / SLOTS
+            unit = nav_now / slots
             for _, s in by_day[t].iterrows():
-                if len(pos) >= SLOTS or cash < unit * 0.999:
+                if len(pos) >= slots or cash < unit * 0.999:
                     break
                 if s.ticker in held:
                     continue
                 size = min(unit, cash) * (1 - COST / 2)
                 cash -= min(unit, cash)
                 pos.append(dict(rule=s.rule, ticker=s.ticker, ti=int(s.ti), sig_di=t, entry_di=t + 1, exit_di=t + int(s.h),
-                                r_path=float(s.r_path), h=int(s.h), size=size))
+                                r_path=float(s.r_path), h=int(s.h), size=size, lab=int(s.lab) if "lab" in s else None))
                 held.add(s.ticker)
         # 3) MTM (종가 기준; 진입 전날은 현금)
         mtm = cash
