@@ -28,10 +28,11 @@ from gauge_notify import build_gauge_email, build_gauge_push  # noqa: E402
 # gauge_config — 세트 정의 무결성
 # ════════════════════════════════════════════════════════
 class TestGaugeConfig:
-    def test_10sets_75tickers(self):
-        """8세트 44종목(07-30) → 10세트 62종목(08-12) → 10세트 75종목(08-15)."""
-        assert len(gcfg.SECTOR_SETS) == 10
-        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 75
+    def test_9sets_70tickers(self):
+        """8세트 44종목(07-30) → 10세트 62종목(08-12) → 10세트 75종목(08-15)
+        → 9세트 70종목(10-04)."""
+        assert len(gcfg.SECTOR_SETS) == 9
+        assert sum(len(v) for v in gcfg.SECTOR_SETS.values()) == 70
 
     def test_all_sets_are_weight_dicts(self):
         """2026-08-15 고정가중 전환 — 세트는 {티커: 가중치} dict 여야 한다."""
@@ -53,14 +54,23 @@ class TestGaugeConfig:
             assert 0.98 <= s <= 1.02, f"{name} 가중치 합 {s:.4f} — 1.0 에서 이탈"
 
     def test_renamed_and_removed(self):
-        """2026-08-15 개편 — K_조선레 개칭 + 삭제 종목 반영."""
+        """2026-08-15 개편 — K_조선레 개칭 + 삭제 종목 반영.
+        2026-10-04 개편 — T_반도체레 → K_반도체레 교체, K_은행 삭제,
+        가온전선(000500) T_전력기기 재편입."""
         assert "S_조선레" in gcfg.SECTOR_SETS
         assert "K_조선레" not in gcfg.SECTOR_SETS
         assert "000150" not in gcfg.SECTOR_SETS["K_반.핵심장비"]   # 두산
-        assert "000500" not in gcfg.SECTOR_SETS["T_전력기기"]      # 가온전선
-        for t in ("403870", "357780", "095340"):                   # HPSP·솔브레인·ISC
-            assert t not in gcfg.SECTOR_SETS["T_반도체레"]
-        assert "403870" in gcfg.SECTOR_SETS["K_반.핵심장비"]        # HPSP 는 이동
+        assert "403870" in gcfg.SECTOR_SETS["K_반.핵심장비"]        # HPSP
+        # 2026-10-04
+        assert "T_반도체레" not in gcfg.SECTOR_SETS
+        assert "K_반도체레" in gcfg.SECTOR_SETS
+        assert "K_은행" not in gcfg.SECTOR_SETS
+        assert "000500" in gcfg.SECTOR_SETS["T_전력기기"]          # 가온전선 재편입
+        assert "062040" not in gcfg.SECTOR_SETS["T_전력기기"]      # 산일전기
+        for t in ("032820", "083650", "051600"):                   # 우리기술·비에이치아이·한전KPS
+            assert t not in gcfg.SECTOR_SETS["T_원자력"]
+        assert "375500" in gcfg.SECTOR_SETS["T_원자력"]            # DL이앤씨
+        assert "443060" in gcfg.SECTOR_SETS["S_조선레"]            # HD현대마린솔루션
 
     def test_no_dup_within_set(self):
         # ⚠ 세트 '간' 중복은 의도된 것 (Kane 2026-08-12) — 세트별 독립 집계라
@@ -191,7 +201,7 @@ class TestFixedWeights:
             mc[t] = 1e9
         out = aggregate_sets(_score_df(rows), pd.Series(mc),
                              gcfg.SECTOR_SETS, {})
-        assert len(out) == 10
+        assert len(out) == len(gcfg.SECTOR_SETS)   # 세트 수는 test_9sets_70tickers 가 고정
         for s in out:
             assert s["weight_mode"] == "fixed"
             # 전원 스코어 → 지정 합이 그대로, p 전부 0.5 → weighted_p = 합 × 0.5
