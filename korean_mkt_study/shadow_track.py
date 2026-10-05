@@ -1,6 +1,16 @@
 """shadow_track.py — 스윙 포트 그림자 추적 (다중 모델, Kane 지시 2026-09-12).
 
-운영 모델이 v1.2.3.4 로 바뀌면서 **직전 두 모델**을 그림자로 돌린다:
+운영 모델이 바뀔 때마다 **직전 모델**을 그림자로 돌린다 (v1.2.3.4 전환 때 v1223·v1112, v1.2.3.5 전환 때 v1234):
+
+  v1234  직전 운영 v1.2.3.4 (2026-10-05 추가, Kane 지시) — 운영이 v1.2.3.5(손절폭 전환 D+6 → D+9)로
+         바뀌면서 **전환 D+6 인 종전 규칙**을 추적한다. 운영과 다른 점은 stop_switch 하나뿐 (5 vs 8).
+         진입 W1 + R²·YZR 제외 필터(strategy_reference.compute_entry_filter — 운영과 같은 함수),
+         청산 ③ + D+6 종가 검사(최근매수일 D+6 종가 ≤ 평단 → 그날 종가 청산), 10×400만.
+         분기: v1.2.3.5 미니 배포일의 가상계좌 상태 (--init --model v1234)
+         판정(사전 등록): 분기 후 60거래일에 손익·MDD·손절 건수 비교.
+  v1235  운영 v1.2.3.5 복제 (전환 D+9) — v1234 와 같은 날 같은 상태에서 분기 (--init --model v1235).
+         그림자 엔진은 운영과 매수·매도일이 하루씩 어긋나는 일이 있어(9/14~10/2 대조 h1_shadow_v1234_check.py: 거래 22건씩, 일부가 하루~며칠 어긋남,
+         총자산 차 ±1.4% 이내) 운영 − v1234 에는 엔진 차이가 섞인다. 규칙 효과는 **v1235 − v1234** 로 본다.
 
   v1223  직전 운영 v1.2.2.3 — 규칙 효과만 보기 위해 **사이징은 신모델과 같은 10×400만**
          유니버스 4조/30% (월별 universe_*.json, 실계정과 동일 갱신)
@@ -17,7 +27,9 @@
   · 매수 = 다음 거래일 시가 (실엔진은 09:10 실시간가)
   · 손절 감지 = 일중 저가, 체결 = min(시가, 손절선) × 0.995 (실엔진은 15분 샘플 + 5분 후 시장가)
   · peak = 일별 고가 누적 (전일까지 기준으로 당일 판정 — 룩어헤드 방지)
-  · 변동배율(v1223) = LLV panel YZ_20 ÷ 직전 252거래일 유니버스 일별 중앙값의 중앙값(전일까지)
+  · D+6 종가 검사(v1234) = 그날 종가로 체결 (실엔진은 15:45 확인 → 16:10 애프터마켓 호가)
+  · 진입 필터(v1234) = LLV OHLC 로 EOD 계산 (실엔진과 같은 함수·같은 데이터)
+  · 변동배율(v1223·v1234) = LLV panel YZ_20 ÷ 직전 252거래일 유니버스 일별 중앙값의 중앙값(전일까지)
     — LLV vol_scale.json 과 같은 정의를 EOD 재현 (과거일 재생이 가능하도록 자체 계산)
 
 데이터: LLV core/extend parquet (OHLC) + panel.parquet (YZ_20).
@@ -38,6 +50,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+import strategy_reference as SR          # 진입 필터(R²·YZR) 정본 — 운영 엔진과 같은 함수를 쓴다
 
 KMS = Path(__file__).resolve().parent
 STOLAB = KMS.parents[1]
@@ -65,6 +79,25 @@ MODELS = {
         stop_switch=5, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
         vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
         check_day=None,
+    ),
+    # 직전 운영 v1.2.3.4 — 운영 v1.2.3.5 와의 차이는 stop_switch(5 vs 8) 하나 (2026-10-05)
+    "v1234": dict(
+        label="v1.2.3.4", universe="monthly",
+        high_window=40, high_min_p=20, trend_ma=200, trend_min_p=140, pullback=0.90,
+        slot_krw=4_000_000.0, max_pos=10, max_slots=2, count_by="stocks",
+        stop_switch=5, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
+        vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
+        check_day=6, entry_filter=True,
+    ),
+    # 운영 v1.2.3.5 복제 — 그림자 엔진끼리 비교해 엔진 차이(시가 매수·저가 감지)를 지운다.
+    # v1234 와의 차이는 stop_switch 하나. 판정은 v1235 − v1234 로 본다 (운영 − v1234 는 엔진 차이가 섞인다).
+    "v1235": dict(
+        label="v1.2.3.5", universe="monthly",
+        high_window=40, high_min_p=20, trend_ma=200, trend_min_p=140, pullback=0.90,
+        slot_krw=4_000_000.0, max_pos=10, max_slots=2, count_by="stocks",
+        stop_switch=8, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
+        vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
+        check_day=6, entry_filter=True,
     ),
 }
 
@@ -222,6 +255,9 @@ def advance(model: str, st: dict) -> dict:
     cond = ((cl <= m["pullback"] * high_n) & (cl > ma) & elig).fillna(False)
     onset = cond & ~cond.shift(1).fillna(False)
     scale_p = vol_scale_panel(yz, elig) if m["vol_linked"] else None
+    excluded = None
+    if m.get("entry_filter"):                      # 진입규칙 3번째: R²·YZR 제외 필터 (v1.2.3.4~)
+        excluded = SR.compute_entry_filter(op, hi, lo, cl).excluded
 
     last = pd.Timestamp(st["last_processed"])
     todo = [d for d in dates if d > last]
@@ -291,12 +327,29 @@ def advance(model: str, st: dict) -> dict:
                                        "peak": price, "entry_date": ds}
         st["pending_buys"] = []
 
+        # 3b) D+check_day 종가 검사 (청산규칙 4번째) — 최근매수일 D+N 종가 ≤ 평단 → 그날 종가 청산
+        if m.get("check_day"):
+            for tk in list(st["positions"]):
+                pos = st["positions"][tk]
+                e_i = didx.get(pd.Timestamp(pos["entry_date"]))
+                if e_i is None or (didx[d] - e_i) != m["check_day"]:
+                    continue
+                c = cl.loc[d, tk] if tk in cl.columns else np.nan
+                if pd.isna(c) or float(c) > pos["avg_price"]:
+                    continue
+                net = float(c) * pos["shares"] * (1 - SELL_FEE - SELL_TAX)
+                st["pending"].append({"date": ds, "amount": net})
+                st["last_sell_date"][tk] = ds
+                del st["positions"][tk]
+
         # 4) 오늘 신호 → 내일 매수 큐 (눌림 깊은 순)
         sig = [(float(depth.loc[d, tk]), tk) for tk in cl.columns if bool(onset.loc[d, tk])]
         sig.sort(reverse=True)
         for dep, tk in sig:
             if st["last_sell_date"].get(tk) == ds:            # 쿨다운 1거래일
                 continue
+            if excluded is not None and tk in excluded.columns and bool(excluded.loc[d, tk]):
+                continue                                      # R²·YZR 제외 필터
             pos = st["positions"].get(tk)
             if pos and pos["slots"] >= m["max_slots"]:
                 continue
@@ -333,7 +386,7 @@ def report():
     if not len(m):
         print("겹치는 날짜 없음"); return
     cols = [c for c in m.columns if c != "date"]
-    print("날짜        " + "".join(f"{c:>16s}" for c in cols) + "   (실계정=v1.2.3.4, 각 열은 분기일=100 기준 지수)")
+    print("날짜        " + "".join(f"{c:>16s}" for c in cols) + "   (실계정=운영 모델, 각 열은 분기일=100 기준 지수)")
     base = {c: m[c].dropna().iloc[0] if m[c].notna().any() else np.nan for c in cols}
     for _, r in m.tail(30).iterrows():
         print(f"{r['date']:10s} " + "".join(f"{(r[c]/base[c]*100 if pd.notna(r[c]) else float('nan')):>15.2f} " for c in cols))

@@ -145,7 +145,7 @@ class EntryParams:
 @dataclass(frozen=True)
 class ExitParams:
     """청산 v1.2.0 — StockPortfolio/app/paper/config.py 복사본."""
-    switch_day: int = 5                           # D+0~5 early, D+6~ late
+    switch_day: int = 8                           # D+0~8 early, D+9~ late (v1.2.3.5, 2026-10-05 — 종전 5)
     early_pct: float = 0.20
     late_up_pct: float = 0.05                     # 피크 > 평단
     late_flat_pct: float = 0.10                   # 피크 ≤ 평단
@@ -313,6 +313,10 @@ def load_panel(up: UniverseParams, vp: VolScaleParams,
 
     wide = {c: px[c].astype("float64").unstack("ticker").sort_index()
             for c in ("open", "high", "low", "close", "volume")}
+    # 거래정지일 0값 → 결측 (2026-10-05). 종전에는 저가 0 이 손절선 아래로 잡혀 0원에 팔렸다
+    # (카카오 2021-04-12 액면분할 정지 −495만원 등, 0값 460종목일). 종가는 직전가가 이월돼 있어 그대로 둔다.
+    for c in ("open", "high", "low", "volume"):
+        wide[c] = wide[c].where(wide[c] > 0)
     dates = wide["close"].index
     tickers = wide["close"].columns
 
