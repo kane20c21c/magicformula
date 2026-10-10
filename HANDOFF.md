@@ -115,9 +115,9 @@ SpotGauge 로 넘어간 이력이다 — 정본은 `SpotGauge/CLAUDE.md` §파�
 |---|---|---|---|
 | 15:10 | 매일 | `com.kane.magicformula-mop-gauge` | 섹터 오버나이트 게이지 (`run_gauge.py`) |
 | 16:20 | 매일 | `com.kane.magicformula-mop-signal` | 데이 포트 익일 신호 (`run_daily.py --rebuild`) |
-| 16:30 / 20:40 | 평일 | `com.stolab.magic-formula.daily-signal` | 황금률 점수 (1차 / 수급 반영 2차) |
-| 16:35 / 20:45 | 평일 | `com.stolab.magic-formula.daily-extended-signal` | 황금률 확장 시그널 |
-| 20:35 | 평일 | `com.kane.kms-shadow-track` | 스윙 포트 그림자 추적 (`shadow_track.py`) |
+| 19:00 체인 3 / 20:30 팩트 체인 2 | 평일 | `magic-formula.daily-signal` (plist 폐지, 라벨만 유지) | 황금률 점수 (잠정 / 확정) |
+| 19:00 체인 4 / 20:30 팩트 체인 3 | 평일 | `magic-formula.daily-extended-signal` (plist 폐지, 라벨만 유지) | 황금률 확장 시그널 |
+| 20:30 팩트 체인 5 | 평일 | `kms-shadow-track` (plist 폐지, 라벨만 유지) | 스윙 포트 그림자 추적 (`shadow_track.py`) |
 
 plist 정본은 `configs/launchd/`, 운영본은 `~/Library/LaunchAgents/` 심링크.
 `[실측]` 2026-08-25 확인: 전부 launchctl 등재 + 최근 종료코드 0.
