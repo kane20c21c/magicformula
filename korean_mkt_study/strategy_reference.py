@@ -214,6 +214,81 @@ def compute_entry_filter(open_wide: pd.DataFrame, high_wide: pd.DataFrame,
     return EntryFilter(r2, yzr, excluded)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# 2-b) 스윙 패널 — 화면·리포트용 전 종목 진입 판정 (2026-10-10 Kane)
+# ────────────────────────────────────────────────────────────────────────────
+# 다각도 분석·리포트가 "이 종목은 스윙 규칙상 지금 어디에 있나" 를 보여주려면 신호가 뜬
+# 후보만이 아니라 **스윙풀 전 종목**의 값이 필요하다. 계산은 여기(정본)서 하고, 소비자는
+# panel_spec() 을 순서대로 나열만 한다 — 지표·기준이 바뀌면 이 파일만 고치면 된다.
+# ⚠ verdict "signal" 은 **전략 신호**다. 실제 매수 예약은 SP 가 쿨다운·슬롯·불타기를 더 본다.
+
+def panel_spec() -> list[dict]:
+    """패널 지표 목록 — 상수에서 매번 만들어 기준 변경이 그대로 반영되게 한다.
+
+    role: entry(모두 충족해야 진입 조건) / exclude(모두 충족하면 제외 — 진입규칙 3번째)
+    op  : 값 op threshold 이 '충족' 의 정의
+    """
+    return [
+        {"key": "trend_gap", "label": f"MA{TREND_MA} 대비 이격", "role": "entry",
+         "op": ">", "threshold": 0.0, "unit": "ratio"},
+        {"key": "depth", "label": f"{HIGH_WINDOW}일 고점 대비 눌림", "role": "entry",
+         "op": ">=", "threshold": round(1 - PULLBACK_RATIO, 6), "unit": "ratio"},
+        {"key": "onset", "label": "새 눌림(onset)", "role": "entry",
+         "op": "==", "threshold": True, "unit": "bool"},
+        {"key": "r2", "label": f"R²{FILTER_R2_WINDOW}", "role": "exclude",
+         "op": ">=", "threshold": FILTER_R2_MIN, "unit": "ratio"},
+        {"key": "yzr", "label": f"YZR({FILTER_YZR_SHORT}/{FILTER_YZR_LONG})", "role": "exclude",
+         "op": "<", "threshold": FILTER_YZR_MAX, "unit": "ratio"},
+    ]
+
+
+def _met(v, op: str, thr) -> Optional[bool]:
+    if v is None:
+        return None
+    return {">": v > thr, ">=": v >= thr, "<": v < thr, "<=": v <= thr, "==": v == thr}[op]
+
+
+def _f(x) -> Optional[float]:
+    return None if x is None or pd.isna(x) else float(x)
+
+
+def build_panel(ind: Indicators, ef: Optional[EntryFilter], ts, tickers: list[str],
+                close_today: pd.Series) -> dict:
+    """스윙풀 전 종목의 패널 값·충족 여부·판정. ef=None 이면 제외 필터 값은 null.
+
+    verdict:
+      signal   — onset & 진입 조건 충족 & 제외 아님 (전략 신호)
+      filtered — onset & 진입 조건 충족 & 제외 조건 충족
+      watch    — 진입 조건 충족 상태가 이어지는 중 (새 눌림 아님 — 재신호 없음)
+      none     — 진입 조건 미충족
+    """
+    spec = panel_spec()
+    rows: dict = {}
+    for tk in tickers:
+        ma = ind.ma120[tk].get(ts) if tk in ind.ma120.columns else None
+        c = close_today.get(tk)
+        vals = {
+            "trend_gap": (_f(c / ma - 1) if (c is not None and ma is not None
+                                               and not pd.isna(c) and not pd.isna(ma) and ma) else None),
+            "depth": _f(ind.depth[tk].get(ts)) if tk in ind.depth.columns else None,
+            "onset": bool(ind.onset[tk].get(ts, False)) if tk in ind.onset.columns else None,
+            "r2": _f(ef.r2[tk].get(ts)) if (ef is not None and tk in ef.r2.columns) else None,
+            "yzr": _f(ef.yzr[tk].get(ts)) if (ef is not None and tk in ef.yzr.columns) else None,
+        }
+        met = {m["key"]: _met(vals[m["key"]], m["op"], m["threshold"]) for m in spec}
+        entry_ok = all(met[m["key"]] for m in spec if m["role"] == "entry" and m["key"] != "onset")
+        excl = [met[m["key"]] for m in spec if m["role"] == "exclude"]
+        excluded = bool(excl) and all(x is True for x in excl)     # 값 없으면 제외 안 함 (정본과 동일)
+        if entry_ok and vals["onset"]:
+            verdict = "filtered" if excluded else "signal"
+        elif entry_ok:
+            verdict = "watch"
+        else:
+            verdict = "none"
+        rows[tk] = {"values": vals, "met": met, "verdict": verdict}
+    return {"spec_version": STRATEGY_VERSION, "metrics_spec": spec, "rows": rows}
+
+
 def check_trailing_stop(peak_price: float, current_close: float, trail_pct: float = TRAIL_STOP_PCT) -> bool:
     """⚠ deprecated (v1.0.0 잔재) — 청산 정본은 StockPortfolio/app/paper/config.py
     (청산규칙 3번째: 시간연동 4분기 × 변동배율, engine.stop_state).
