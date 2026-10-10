@@ -83,7 +83,8 @@ python3 walkforward.py --start 2026-07-01 --end 2026-07-24   # 검증용 백테�
 "익일 갭상승 확률 85%" 같은 절대 해석은 불가능하다.
 
 **소비자 계약 (StockPortfolio 데이 포트, Kane 확정 2026-08-03)**:
-`p ≥ 0.925` 이고 `rank ≤ 15` 인 종목까지만 충원하고, **슬롯을 못 채우면 비워둔다**.
+`p ≥ 0.925` 이고 순위 컷 이내인 종목까지만 충원하고, **슬롯을 못 채우면 비워둔다**.
+순위 컷은 코드 기본 `rank ≤ 15` 이나 **2026-09-13 부터 `data/paper_day/config.json` 오버라이드로 `rank ≤ 10`**.
 정본은 `StockPortfolio/app/paper_day/config.py` 의 `min_signal_p` / `fill_max_rank`
 — 여기(mop_model)는 순위와 p 만 공급하고 컷은 하지 않는다.
 ⚠ 슬롯 수는 소비자 소관이고 **2026-08-24 부터 10슬롯**(`data/paper_day/config.json`
