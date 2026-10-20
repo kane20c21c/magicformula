@@ -1,6 +1,6 @@
 """shadow_track.py — 스윙 포트 그림자 추적 (다중 모델, Kane 지시 2026-09-12).
 
-운영 모델이 바뀔 때마다 **직전 모델**을 그림자로 돌린다 (v1.2.3.4 전환 때 v1223·v1112, v1.2.3.5 전환 때 v1234):
+운영 모델이 바뀔 때마다 **직전 모델**을 그림자로 돌린다 (v1.2.3.4 전환 때 v1223·v1112, v1.2.3.5 전환 때 v1234, v1.2.3.6 전환 때 v1235 유지 + v1236 복제):
 
   v1234  직전 운영 v1.2.3.4 (2026-10-05 추가, Kane 지시) — 운영이 v1.2.3.5(손절폭 전환 D+6 → D+9)로
          바뀌면서 **전환 D+6 인 종전 규칙**을 추적한다. 운영과 다른 점은 stop_switch 하나뿐 (5 vs 8).
@@ -98,6 +98,16 @@ MODELS = {
         stop_switch=8, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
         vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
         check_day=6, entry_filter=True,
+    ),
+    # 운영 v1.2.3.6 복제 (2026-10-20, Kane 확정) — v1235 와의 차이는 check_day(6 → None) 하나.
+    # 판정은 v1236 − v1235 = D+6 종가 검사 효과. 근거: 볼트 "2026-10-20 눌림목 분류와 청산 규칙 연구" §6-2.
+    "v1236": dict(
+        label="v1.2.3.6", universe="monthly",
+        high_window=40, high_min_p=20, trend_ma=200, trend_min_p=140, pullback=0.90,
+        slot_krw=4_000_000.0, max_pos=10, max_slots=2, count_by="stocks",
+        stop_switch=8, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
+        vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
+        check_day=None, entry_filter=True,
     ),
 }
 
