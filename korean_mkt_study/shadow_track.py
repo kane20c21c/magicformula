@@ -1,7 +1,12 @@
 """shadow_track.py — 스윙 포트 그림자 추적 (다중 모델, Kane 지시 2026-09-12).
 
 운영 모델이 바뀔 때마다 **직전 모델**을 그림자로 돌린다 (v1.2.3.4 전환 때 v1223·v1112, v1.2.3.5 전환 때 v1234, v1.2.3.6 전환 때 v1235 유지 + v1236 복제,
-v1.2.3.7 전환 때 v1236 유지 + v1237 복제):
+v1.2.3.7 전환 때 v1236 유지 + v1237 복제, v1.2.3.8 전환 때 v1237 유지 + v1238 복제):
+
+  v1238  운영 v1.2.3.8 복제 (2026-10-26, Kane 확정 K1 (a) — 손절 판정 **종가 확인** + **익일 시가 체결** + **peak 종가 기준**).
+         v1237 과의 차이는 stop_mode("close") 하나. 종가 단계에서 peak=max(peak, 종가) → 종가 ≤ 선이면 exit_pending 마킹,
+         다음 거래일 시가에 체결(STOP_FILL 할인 없음 — 장중 체결 할인은 해당 없음). peak 는 종가로만 갱신(고가 아님).
+         판정은 **v1238 − v1237 = 판정 시점·peak 정의 효과**. 근거: 볼트 "2026-10-26 K1 재검증" (스윙44 10슬롯 110 → 318, 띠 100%).
 
   v1237  운영 v1.2.3.7 복제 (2026-10-26, Kane 확정 K2 — 변동배율 끔). v1236 과의 차이는 vol_linked(True → False) 하나.
          판정은 **v1237 − v1236 = 변동배율 효과**. 근거: 볼트 "2026-10-20 눌림목 분류와 청산 규칙 연구" §9 권고 ③
@@ -113,6 +118,16 @@ MODELS = {
         stop_switch=8, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
         vol_linked=True, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
         check_day=None, entry_filter=True,
+    ),
+    # 운영 v1.2.3.8 복제 (2026-10-26, Kane 확정 K1 (a)) — v1237 과의 차이는 stop_mode("close") 하나.
+    # 종가 확인 → 익일 시가 체결, peak 종가 기준. 판정은 v1238 − v1237.
+    "v1238": dict(
+        label="v1.2.3.8", universe="monthly",
+        high_window=40, high_min_p=20, trend_ma=200, trend_min_p=140, pullback=0.90,
+        slot_krw=4_000_000.0, max_pos=10, max_slots=2, count_by="stocks",
+        stop_switch=8, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.10,
+        vol_linked=False, clip_early=(0.10, 0.40), clip_late_up=(0.03, 0.15), clip_late_flat=(0.05, 0.25),
+        check_day=None, entry_filter=True, stop_mode="close",
     ),
     # 운영 v1.2.3.7 복제 (2026-10-26, Kane 확정 K2) — v1236 과의 차이는 vol_linked(True → False) 하나.
     # 판정은 v1237 − v1236 = 변동배율 효과. 클립 값은 vol_linked=False 면 읽히지 않지만 비교를 위해 그대로 둔다.
@@ -299,9 +314,18 @@ def advance(model: str, st: dict) -> dict:
         st["cash"] += sum(p["amount"] for p in settle)
         st["pending"] = [p for p in st["pending"] if p["date"] > ds]
 
-        # 2) 손절 (전일까지의 peak 기준, 당일 저가 감지)
+        # 2) 손절 — intraday: 전일까지의 peak 기준, 당일 저가 감지 / close(v1.2.3.8): 전일 종가 확인분을 오늘 시가에 체결
+        close_mode = m.get("stop_mode") == "close"
         for tk in list(st["positions"]):
             pos = st["positions"][tk]
+            if close_mode:
+                if pos.get("exit_pending") and tk in op.columns and not pd.isna(op.loc[d, tk]):
+                    fill = float(op.loc[d, tk])                 # 익일 시가 — 장중 체결 할인(STOP_FILL) 없음
+                    net = fill * pos["shares"] * (1 - SELL_FEE - SELL_TAX)
+                    st["pending"].append({"date": ds, "amount": net})
+                    st["last_sell_date"][tk] = ds
+                    del st["positions"][tk]
+                continue
             if tk not in cl.columns or pd.isna(lo.loc[d, tk]):
                 continue
             e_i = didx.get(pd.Timestamp(pos["entry_date"]))
@@ -380,12 +404,24 @@ def advance(model: str, st: dict) -> dict:
                 continue
             st["pending_buys"].append({"ticker": tk, "queued_on": ds})
 
-        # 5) peak 갱신 + 평가
+        # 5) peak 갱신 + 평가 (+ close 모드: 종가 확인 손절 마킹 → 다음 거래일 시가 체결)
         mv = 0.0
         for tk, pos in st["positions"].items():
-            if tk in hi.columns and not pd.isna(hi.loc[d, tk]):
-                pos["peak"] = max(pos["peak"], float(hi.loc[d, tk]))
             c = cl.loc[d, tk] if tk in cl.columns else np.nan
+            if close_mode:
+                if not pd.isna(c):
+                    pos["peak"] = max(pos["peak"], float(c))            # peak 는 종가로만 (v1.2.3.8)
+                    if not pos.get("exit_pending"):
+                        e_i = didx.get(pd.Timestamp(pos["entry_date"]))
+                        d_plus = (didx[d] - e_i) if e_i is not None else 99
+                        sc = 1.0
+                        if scale_p is not None:
+                            v = scale_p.loc[d, tk] if tk in scale_p.columns else np.nan
+                            sc = float(v) if not pd.isna(v) else 1.0
+                        if float(c) <= stop_line(pos, d_plus, m, sc):
+                            pos["exit_pending"] = ds
+            elif tk in hi.columns and not pd.isna(hi.loc[d, tk]):
+                pos["peak"] = max(pos["peak"], float(hi.loc[d, tk]))
             mv += (float(c) if not pd.isna(c) else pos["avg_price"]) * pos["shares"]
         pend = sum(p["amount"] for p in st["pending"])
         rows.append({"date": ds, "cash": round(st["cash"], 2), "pending": round(pend, 2),
