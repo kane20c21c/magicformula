@@ -24,6 +24,11 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   python3 run_daily.py --lgbm-only        # 속도(단독)
   python3 run_daily.py --target y_intra --signal-dir output/signals_white   # 화이트포트 (2026-09-15)
 
+★ 그림자 v2(--variant v2, 2026-10-29 Kane 승인 — WP9 (가)): 데이포트 타깃 그대로, 피처만
+  cols.json 의 CHAMPION_V2(146 = wy 2개 제거 + vol_idx 3종 인과 치환)로 학습해
+  output/signals_v2 에만 쓴다. 운영 output/signals 는 건드리지 않는다. 데이 그림자 R9 가 읽는다.
+  python3 run_daily.py --variant v2      # (features 는 앞선 운영 --rebuild 가 만든 것을 재사용)
+
 ★ 화이트포트(--target y_intra): 같은 features.parquet 에 intra.py 의 타깃·5피처를 얹어
   "익일 시가→종가가 그날 중앙값보다 큰가" 를 학습한다. 신호는 별도 디렉터리에만 쓴다 —
   데이포트 경로(output/signals)·기본 동작은 옵션을 안 주면 전과 같다.
@@ -59,12 +64,33 @@ PROFILES = {
 }
 
 
-def signal(today=None, use_ensemble=True, target=None, top_k=None,
-           rebuild=False, save=True, signal_dir=None):
+# 피처 변형 — v1 = 운영 CHAMPION(148). v2 = 그림자(146), 데이포트 타깃 전용.
+VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2"}
+
+
+def resolve_profile(target=None, variant="v1"):
+    """(target, variant) → 신호 프로필 dict (cols_key 포함). v1 은 PROFILES 그대로."""
     target = target or cfg.TARGET
+    variant = variant or "v1"
     if target not in PROFILES:
         raise SystemExit(f"--target {target}: 지원 안 함 ({', '.join(PROFILES)})")
-    prof = PROFILES[target]
+    if variant not in VARIANTS:
+        raise SystemExit(f"--variant {variant}: 지원 안 함 ({', '.join(VARIANTS)})")
+    prof = dict(PROFILES[target], cols_key=VARIANTS[variant], variant=variant)
+    if variant != "v1":
+        if target != cfg.TARGET:
+            raise SystemExit(f"--variant {variant} 는 데이포트 타깃({cfg.TARGET}) 전용")
+        prof.update(name=prof["name"] + f" (그림자 {variant})",
+                    strategy_id=prof["strategy_id"] + f"_{variant}",
+                    model_version=prof["model_version"] + f"+{variant}",
+                    signal_dir=prof["signal_dir"] + f"_{variant}")
+    return prof
+
+
+def signal(today=None, use_ensemble=True, target=None, top_k=None,
+           rebuild=False, save=True, signal_dir=None, variant="v1"):
+    target = target or cfg.TARGET
+    prof = resolve_profile(target, variant)
     top_k = top_k or prof["top_k"]
     signal_dir = signal_dir or prof["signal_dir"]
     if not os.path.isabs(signal_dir):            # CLI 상대경로는 mop_model 기준 (launchd cwd 무관)
@@ -78,7 +104,13 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
         build_features()
 
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
-    cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
+    cols_all = json.load(open(cfg.COLS_JSON))
+    if prof["cols_key"] not in cols_all:
+        raise SystemExit(f"cols.json 에 {prof['cols_key']} 없음 — build_features 재실행 필요 (--rebuild)")
+    cols = cols_all[prof["cols_key"]]
+    lack = [c for c in cols if c not in d.columns]
+    if lack:
+        raise SystemExit(f"features.parquet 에 피처 누락 {lack[:5]} — build_features 재실행 필요 (--rebuild)")
     if target == intra.TARGET_INTRA:
         d, cols = intra.prepare_intra(d, cols)
     days = np.sort(d.Date.unique())
@@ -114,6 +146,7 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
         "strategy_id": prof["strategy_id"],
         "model_version": prof["model_version"],
         "target": target,
+        "variant": prof["variant"],
         "as_of": str(today.date()),
         "generated_at": datetime.now(KST).isoformat(timespec="seconds"),
         "top_k": int(top_k),
@@ -151,6 +184,8 @@ if __name__ == "__main__":
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--target", default=None, help="y_rel(기본, 데이포트) | y_intra(화이트포트)")
     ap.add_argument("--signal-dir", default=None, help="신호 JSON 디렉터리 (기본: 타깃별 프로필)")
+    ap.add_argument("--variant", default="v1", choices=sorted(VARIANTS),
+                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2")
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
@@ -179,4 +214,4 @@ if __name__ == "__main__":
                   f"— 가드 없이 계속 진행", file=_sys.stderr)
 
     signal(today=a.date, use_ensemble=not a.lgbm_only, target=a.target,
-           rebuild=a.rebuild, save=not a.no_save, signal_dir=a.signal_dir)
+           rebuild=a.rebuild, save=not a.no_save, signal_dir=a.signal_dir, variant=a.variant)
