@@ -69,6 +69,12 @@ Sharpe 0.96 → **1.87**. 검증 하네스 = `scripts/validate_area_redesign.py`
 
 ⚠ 와이코프는 **5번째 점수 요소가 아니라 게이트**다. 데이·스윙 포트는 황금률의
 입력이 아니다 (독립 룰).
+⚠ **게이트 3변형 그림자** (2026-10-30 케인 WR-a, 와이코프 재작업 WR1 ①): WP9-3 에서 게이트 근거
+(`Wyckoff_Label` 예측력)가 없다고 나와(10월 219종목 중 매일 150~185 제외), 운영은 그대로 두고
+`daily/runner.run()` 이 같은 실행에서 `output/gate_shadow/{prefix}_gate_shadow_{날짜}.json` 에 세 변형을 기록한다 —
+label(현행) · off(끔) · down(최근 10거래일 MARKDOWN_WATCH·PANIC_ZONE 제외). `d0_flag` 는 LLV
+`Wyckoff_Phase_D0`(WR2)가 생기면 기록만. 판정 = WR 계획 §4 (20거래일, (가)·(나)가 (다) 이상이면 (다) 폐기).
+그림자 실패는 운영 산출을 막지 않는다(try/except). 끄려면 `run(gate_shadow=False)`.
 ⚠ 정본은 언제나 `configs/active_strategy.yaml`. (`SCHEDULED_TASKS.md` 에 남아 있던
 v1 라벨 "CompR15+R1" 은 2026-08-14 `v2_combined` 로 수정 완료.)
 

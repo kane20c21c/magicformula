@@ -56,6 +56,21 @@ _PROJ_ROOT  = _PKG_DIR.parent                          # Magic Formula/
 OUTPUT_DIR  = _PROJ_ROOT / "output" / "signals"
 
 LOOKBACK_CALENDAR_DAYS = 500   # 조회 시작 = end_date − 500일 (워밍업 포함)
+
+# ── 황금률 Wyckoff 게이트 3변형 그림자 (2026-10-30 케인 WR-a — 와이코프 재작업 WR1 ①) ──
+# 운영(신호 JSON)은 그대로 (다) Label 게이트. 같은 실행에서 세 변형의 점수·후보·돌파를 따로 기록만 한다.
+#   label = (다) 현행: Wyckoff_Label ∈ gate_exclude_phases(Markdown) 이면 제외
+#   off   = (가) 게이트 끔
+#   down  = (나) 근거 있는 하락 표식(WP9-3 ✅): 최근 GATE_SHADOW_N 거래일 안에 Wyckoff_Signal ∈ MARKDOWN_WATCH·PANIC_ZONE 이면 제외
+#           (online Downtrend 진입은 MF 가 hillstorm 을 import 하지 않으므로 LLV `Wyckoff_Phase_D0`(WR2) 가 생기면
+#            d0_flag 로 따로 기록만 — (나) 정의에는 넣지 않는다: 그림자 기간 중 정의가 바뀌지 않게)
+# 판정(사전 등록 — WR 계획 §4): 20거래일 그림자에서 candidate 의 D+5/D+10 초과수익 비교 — (가)·(나)가 (다)보다
+#   같거나 높으면 (다) 폐기. 표본이 작으면 2023~ 소급(wp94_gate 틀)이 주 판정, 그림자는 운영 확인용.
+# 출력은 별도 폴더 — output/signals 의 daily_signal_* glob 소비자와 섞이지 않게.
+GATE_SHADOW_DIR = _PROJ_ROOT / "output" / "gate_shadow"
+GATE_SHADOW_N = 10
+GATE_DOWN_SIGNALS = ("MARKDOWN_WATCH", "PANIC_ZONE")
+GATE_VARIANTS = ("label", "off", "down")
 MIN_ROWS = 80                  # 이보다 짧으면 SKIP
 
 
@@ -90,6 +105,62 @@ def _phase_series(df: pd.DataFrame) -> pd.Series:
     return pd.Series(index=df.index, dtype=object)
 
 
+def _recent_flag(mask: pd.Series, n: int) -> pd.Series:
+    """mask(bool) 가 최근 n 행(오늘 포함) 안에 한 번이라도 True 면 True."""
+    return mask.astype(float).rolling(n, min_periods=1).max().fillna(0).astype(bool)
+
+
+def gate_shadow_row(t: str, df: pd.DataFrame, areas: dict, cfg, phase_label: pd.Series) -> dict | None:
+    """한 종목의 게이트 3변형 점수·후보·돌파 (WR1 ① 그림자). 운영 점수와 같은 영역 점수를 쓴다."""
+    from magic_formula.analysis import area_scores as A
+    ungated = A.combine_scores(areas, cfg.weights, None, gate=False)
+    if ungated.dropna().empty or len(ungated) < 2:
+        return None
+    idx = ungated.index
+    m_label = phase_label.reindex(idx).isin(cfg.gate_exclude_phases)
+    sig = df["Wyckoff_Signal"].reindex(idx) if "Wyckoff_Signal" in df.columns else pd.Series(index=idx, dtype=object)
+    m_down = _recent_flag(sig.isin(GATE_DOWN_SIGNALS), GATE_SHADOW_N)
+    d0_flag = None
+    if "Wyckoff_Phase_D0" in df.columns:
+        d0 = df["Wyckoff_Phase_D0"].reindex(idx)
+        entry = (d0 == "Downtrend") & (d0.shift(1) != "Downtrend") & d0.shift(1).notna()
+        d0_flag = bool(_recent_flag(entry, GATE_SHADOW_N).iloc[-1])
+    series = {"label": ungated.where(~m_label), "off": ungated, "down": ungated.where(~m_down)}
+    row = {"ticker": t, "label_now": (str(phase_label.reindex(idx).iloc[-1])
+                                       if pd.notna(phase_label.reindex(idx).iloc[-1]) else ""),
+           "label_gate": bool(m_label.iloc[-1]), "down_flag": bool(m_down.iloc[-1]), "d0_flag": d0_flag,
+           "close": float(df["Close"].iloc[-1]) if "Close" in df.columns else None}
+    for k, sr in series.items():
+        cur = sr.iloc[-1]
+        row[k] = {
+            "score": round(float(cur), 2) if pd.notna(cur) else None,
+            "is_signal": check_breakout_signal(pd.DataFrame({"composite_score": sr}), cfg.threshold),
+            "candidate": bool(pd.notna(cur) and float(cur) >= cfg.candidate_threshold),
+        }
+    return row
+
+
+def write_gate_shadow(rows: list[dict], cfg, data_date: str, output_prefix: str,
+                      out_dir: Path | None = None) -> Path:
+    out_dir = out_dir or GATE_SHADOW_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary = {k: {"scored": sum(r[k]["score"] is not None for r in rows),
+                   "candidates": sum(r[k]["candidate"] for r in rows),
+                   "signals": sum(r[k]["is_signal"] for r in rows)} for k in GATE_VARIANTS}
+    payload = {
+        "date": data_date, "source": output_prefix, "created_at": datetime.now().isoformat(timespec="seconds"),
+        "definition": {"label": f"Wyckoff_Label ∈ {list(cfg.gate_exclude_phases)} 제외 (현행)",
+                       "off": "게이트 없음",
+                       "down": f"최근 {GATE_SHADOW_N}거래일 Wyckoff_Signal ∈ {list(GATE_DOWN_SIGNALS)} 제외",
+                       "d0_flag": f"(기록만) 최근 {GATE_SHADOW_N}거래일 Wyckoff_Phase_D0 Downtrend 진입 — 컬럼 없으면 null"},
+        "threshold": cfg.threshold, "candidate_threshold": cfg.candidate_threshold,
+        "summary": summary, "rows": rows,
+    }
+    path = out_dir / f"{output_prefix}_gate_shadow_{data_date}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, default=json_default), encoding="utf-8")
+    return path
+
+
 # ---------------------------------------------------------------------------
 # 전일 OHLCV 정보
 # ---------------------------------------------------------------------------
@@ -121,6 +192,7 @@ def run(
     output_prefix: str = "daily_signal",
     regimes_prefix: str = "daily_regimes",
     universe_override: str | None = None,
+    gate_shadow: bool = True,
 ) -> dict:
     """
     데일리 파이프라인 실행 (v2_combined).
@@ -184,6 +256,7 @@ def run(
     all_results: list[dict] = []
     signals: list[dict] = []
     last_dates: list = []
+    shadow_rows: list[dict] = []
 
     for t, df in stock_data.items():
         areas = A.compute_area_scores(df, regime_b, regime_q)
@@ -191,6 +264,13 @@ def run(
             areas, cfg.weights, phases[t],
             gate=cfg.gate_enabled, exclude_phases=cfg.gate_exclude_phases,
         )
+        if gate_shadow:
+            try:   # 그림자 실패가 운영 산출을 막지 않게
+                sr = gate_shadow_row(t, df, areas, cfg, phases[t])
+                if sr is not None:
+                    shadow_rows.append(sr)
+            except Exception as exc:                     # noqa: BLE001
+                print(f"[daily.runner] ⚠ 게이트 그림자 {t} 실패: {exc}")
         if comp.dropna().empty or len(comp) < 2:
             continue
         last_dates.append(df.index[-1])
@@ -284,6 +364,12 @@ def run(
     print(f"[daily.runner] JSON 저장: {json_path}")
     write_md(result, md_path)
     print(f"[daily.runner] MD 저장:   {md_path}")
+    if gate_shadow and shadow_rows:
+        try:
+            sp = write_gate_shadow(shadow_rows, cfg, data_date, output_prefix)
+            print(f"[daily.runner] 게이트 그림자 저장: {sp}")
+        except Exception as exc:                         # noqa: BLE001
+            print(f"[daily.runner] ⚠ 게이트 그림자 저장 실패: {exc}")
     return result
 
 
