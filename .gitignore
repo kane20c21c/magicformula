@@ -103,3 +103,7 @@ output/redesign_pos52_panel.parquet
 
 # 2026-09-12 스윙 포트 데이터 연장 사본 (build_data_ext.py 로 재생성 — 정본은 data/ 스냅샷)
 korean_mkt_study/data_ext/
+
+# 2026-10-30 기간 재구성 세트(2015-01-02~2026-10-29, 294MB) + pykrx 중간 캐시 — 생성은 rebuild_data_2015.py
+korean_mkt_study/data_2015/
+korean_mkt_study/_cache_2015/
