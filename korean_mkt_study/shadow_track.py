@@ -160,20 +160,30 @@ def _universe_docs() -> list[dict]:
     return docs
 
 
+def _effective_of(doc: dict) -> str:
+    """적용 시작일 — effective_date, 없으면 apply_month 1일, 둘 다 없으면 base_date 다음 날 근사(base_date 문자열)."""
+    if doc.get("effective_date"):
+        return str(doc["effective_date"])[:10]
+    am = str(doc.get("apply_month") or "")
+    return f"{am}-01" if len(am) == 7 else str(doc.get("base_date", ""))
+
+
 def universe_for(model: str, d: pd.Timestamp) -> dict:
-    """모델·날짜별 유니버스 문서. fixed: 지정 파일 / monthly: apply_month 매칭, 없으면 base_date ≤ d 최신."""
+    """모델·날짜별 유니버스 문서. fixed: 지정 파일 / monthly: **적용 시작일 ≤ d 인 파일 중 가장 늦은 것**.
+
+    2026-10-31 케인 U6 (월 중간 적용): 조정 = 옵션 만기 주 금요일 종가 → 다음 거래일부터. effective_date 없는
+    옛 파일은 apply_month 1일로 본다 — 종전(apply_month 매칭, 없으면 base_date ≤ d 최신)과 과거 날짜 결과가 같다.
+    """
     spec = MODELS[model]["universe"]
     docs = _universe_docs()
     if spec.startswith("fixed:"):
         name = spec.split(":", 1)[1]
         return next(x for x in docs if x["_file"] == name)
-    ym = d.strftime("%Y-%m")
-    match = [x for x in docs if x.get("apply_month") == ym]
-    if match:
-        return match[-1]
-    by_base = sorted(docs, key=lambda x: str(x.get("base_date", "")))
-    older = [x for x in by_base if str(x.get("base_date", "")) <= d.strftime("%Y-%m-%d")]
-    return older[-1] if older else by_base[0]          # 가장 이른 파일보다 앞선 날짜 → 그 파일
+    day = d.strftime("%Y-%m-%d")
+    ok = [x for x in docs if _effective_of(x) and _effective_of(x) <= day]
+    if ok:
+        return max(ok, key=lambda x: (_effective_of(x), x["_file"]))
+    return min(docs, key=lambda x: _effective_of(x))      # 가장 이른 파일보다 앞선 날짜 → 그 파일
 
 
 def all_universe_tickers(model: str) -> tuple[list[str], dict]:

@@ -44,7 +44,7 @@ def _setup(tmp_path):
 
 def test_filters_and_warnings(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp)
+    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=0)
     assert [s["ticker"] for s in r["stocks"]] == ["000010"]
     assert r["apply_month"] == "2026-11" and r["base_date"] == "2026-10-30"
     pv = r["data_provenance"]
@@ -59,8 +59,8 @@ def test_december_rolls_to_january():
 
 def test_uses_value_on_or_before_base(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 27), llv=llv, meta_path=mp)
-    assert r["apply_month"] == "2026-11" and r["count"] == 1
+    r = BU.build(date(2026, 10, 27), llv=llv, meta_path=mp, min_count=0)
+    assert r["apply_month"] == "2026-10" and r["effective_date"] == "2026-10-28" and r["count"] == 1
 
 
 @pytest.mark.skipif(not (KMS / "data" / "universe_2026-09_4jo_30pct.json").exists()
@@ -69,3 +69,46 @@ def test_reproduces_september_file():
     old = json.loads((KMS / "data" / "universe_2026-09_4jo_30pct.json").read_text(encoding="utf-8"))
     r = BU.build(date(2026, 8, 31))
     assert sorted(s["ticker"] for s in r["stocks"]) == sorted(s["ticker"] for s in old["stocks"])
+
+
+# ── U6 확정 (케인 2026-10-31): 최소 30종목 · 채움은 LLV 패널 안에서만 · 월 중간 적용(effective_date) ──
+
+WD = lambda d: d.weekday() < 5          # noqa: E731 — 거래일 캘린더 대용(주말만 휴장)
+
+
+def test_floor_fills_from_panel_by_mktcap(tmp_path):
+    llv, mp = _setup(tmp_path)
+    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=2)
+    assert [s["ticker"] for s in r["stocks"]] == ["000010", "000030"]          # 4조/30% 1 + 바닥(외인 50%·3조) 1
+    assert r["count_rule"] == 1 and r["floor_filled"] == ["000030"] and r["floor_shortfall"] == 0
+    assert [s["rule"] for s in r["stocks"]] == ["4jo_30pct", "floor"]
+    assert "000020" not in r["floor_filled"]                                   # 외인 20% 는 바닥 후보 아님
+
+
+def test_floor_never_goes_outside_panel(tmp_path):
+    llv, mp = _setup(tmp_path)
+    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=30)
+    tk = {s["ticker"] for s in r["stocks"]}
+    assert "000990" not in tk                                                  # KRX 원본에만 있는 종목은 채우지 않음
+    assert tk == {"000010", "000030"} and r["floor_shortfall"] == 28
+    assert r["filters"]["min_count"] == 30
+
+
+def test_floor_noop_when_rule_has_enough(tmp_path):
+    llv, mp = _setup(tmp_path)
+    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=1)
+    assert r["floor_filled"] == [] and r["count"] == 1
+
+
+def test_expiry_week_friday_and_effective():
+    assert BU.expiry_week_friday(2026, 11, WD) == date(2026, 11, 13)          # 둘째 목 11-12 → 금 11-13
+    assert BU.expiry_week_friday(2026, 10, WD) == date(2026, 10, 9)
+    hol = lambda d: WD(d) and d != date(2026, 11, 13)                          # noqa: E731 — 금요일 휴장이면 목요일
+    assert BU.expiry_week_friday(2026, 11, hol) == date(2026, 11, 12)
+    assert BU.next_trading_day(date(2026, 11, 13), WD) == date(2026, 11, 16)
+
+
+def test_effective_date_mid_month(tmp_path):
+    llv, mp = _setup(tmp_path)
+    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=0, effective=date(2026, 11, 16))
+    assert r["effective_date"] == "2026-11-16" and r["apply_month"] == "2026-11" and r["base_date"] == "2026-10-30"
