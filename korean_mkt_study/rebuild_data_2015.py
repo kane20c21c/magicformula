@@ -371,7 +371,11 @@ LLV_OPT = HERE.parents[1] / "LongLiveVault" / "data" / "options"
 DERIV_COLS = ["Date", "Kind", "Session", "Underlying", "Type", "Code", "Name", "Open", "High", "Low", "Close", "Change", "IV", "BasePrice", "Volume", "Amount", "OI"]
 def _daily_to_all(f: Path) -> pd.DataFrame:
     d = pd.read_parquet(f); d["Kind"] = f.name[:3]
-    d["Session"] = d["Name"].str.extract(r"\((정규|야간)\)\s*$")[0].fillna("미구분")
+    # 옵션은 "(정규)/(야간)", 선물은 "(주간)/(야간)" — 통합본은 주간→정규. 표기 없음(코스닥위클리 옵션·일부 선물)은 미구분.
+    sess = d["Name"].str.extract(r"\((정규|주간|야간)\)\s*$")[0].replace({"주간": "정규"})
+    if d["Kind"].iloc[0] == "opt":   # 표기 없는 옵션(코스닥위클리)은 통합본 규칙대로 IV>0 → 정규 / IV=0 → 야간 (2026-08-11·12 대조 100%)
+        sess = sess.fillna(pd.Series(np.where(d["IV"] > 0, "정규", "야간"), index=d.index))
+    d["Session"] = sess.fillna("미구분")
     d = d[~((d["Volume"] == 0) & (d["OI"] == 0))]
     return d[DERIV_COLS]
 
