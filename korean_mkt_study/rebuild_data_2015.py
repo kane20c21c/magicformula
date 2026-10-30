@@ -401,7 +401,104 @@ def step_deriv():
         sc = pa.scalar(day.to_pydatetime())
         log(f"  대조 {day.date()}: 구 사본 {pc.sum(pc.equal(old, sc)).as_py()} / 새 {pc.sum(pc.equal(allv['Date'], sc)).as_py()}")
 
+# ─────────────────────────── investor_flow — KIS 경로 (케인 결정 2026-10-30 19:18) ───────────────────────────
+# KRX Data Marketplace 차단으로 pykrx 전종목 수급을 못 받아, KIS 종목별 투자자매매동향(일별) FHPTJ04160001
+# (investor-trade-by-stock-daily, FID_INPUT_DATE_1 기준일 ~ 과거 30거래일/콜) 로 연장한다.
+#  · 시장구분 **J(KRX)** — 2026-06-30 삼성전자·카카오·KR모터스 대조에서 저장본(pykrx)과 백만원 반올림 수준 일치.
+#    UN(KRX+NXT) 은 NXT 물량이 섞여 삼성전자 외국인이 −8,685억 vs −6,972억 로 달랐다 → 이력과 같은 정의 = KRX 정규장만.
+#  · 단위 백만원(반올림) → ×1,000,000 원. 소형주의 100만원 미만 순매수는 0 이 된다 (원본은 원 단위).
+#  · 외국인 = frgn_ntby_tr_pbmn (등록+비등록 합) · 기관 = orgn(기관계) · 기타법인 = etc_corp.
+KIS_FLOW_URL = "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily"
+FLOW_CACHE = CACHE / "flow_kis"; FLOW_CACHE.mkdir(exist_ok=True)
+_KF = None
+def _kis():
+    global _KF
+    if _KF is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("kf", HERE.parents[1] / "LongLiveVault" / "stolab_data" / "kis_fetcher.py")
+        _KF = importlib.util.module_from_spec(spec); spec.loader.exec_module(_KF)
+    return _KF
+
+def kis_flow_ticker(ticker: str, start: pd.Timestamp, end: pd.Timestamp, sess) -> pd.DataFrame:
+    """end 기준일부터 start 까지 거슬러 받는다 (콜당 30거래일). 마지막 페이지의 start 이전 행도 남겨 대조에 쓴다."""
+    f = FLOW_CACHE / f"{ticker}.pkl"
+    if f.exists(): return pd.read_pickle(f)
+    kf = _kis(); tok = kf._get_token(); h = kf._build_headers(tok, "FHPTJ04160001")
+    cols = {"prsn_ntby_tr_pbmn": "개인", "orgn_ntby_tr_pbmn": "기관", "frgn_ntby_tr_pbmn": "외국인", "etc_corp_ntby_tr_pbmn": "기타법인"}
+    rows, cursor = [], end
+    for _ in range(8):
+        body = None
+        for attempt in range(5):
+            try:
+                r = sess.get(kf._BASE_URL + KIS_FLOW_URL, headers=h, timeout=10,
+                             params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": ticker, "FID_INPUT_DATE_1": ymd(cursor), "FID_ORG_ADJ_PRC": "", "FID_ETC_CLS_CODE": ""})
+                body = r.json()
+                if body.get("rt_cd") == "0": break
+                if "초당" in (body.get("msg1") or "") or body.get("msg_cd") == "EGW00201": time.sleep(0.6); continue
+                log(f"  {ticker}: KIS 거부 {body.get('msg_cd')} {body.get('msg1')}"); body = None; break
+            except Exception as e:
+                time.sleep(1.0 * (attempt + 1)); body = None
+        if not body: break
+        o = pd.DataFrame(body.get("output2") or [])
+        if o.empty: break
+        o = o[["stck_bsop_date"] + list(cols)].rename(columns=cols)
+        o["date"] = pd.to_datetime(o["stck_bsop_date"]); o = o.drop(columns="stck_bsop_date")
+        rows.append(o)
+        if o["date"].min() <= start or len(o) < 20: break
+        cursor = o["date"].min() - pd.Timedelta(days=1)
+        time.sleep(0.05)
+    if not rows:
+        d = pd.DataFrame(columns=["개인", "기관", "외국인", "기타법인"]); d.index.name = "date"
+    else:
+        d = pd.concat(rows).drop_duplicates("date").set_index("date").sort_index()
+        d = d[d.index <= end]
+        for c in ("개인", "기관", "외국인", "기타법인"):
+            d[c] = (pd.to_numeric(d[c].replace({"": "0", "-": "0"}), errors="coerce").fillna(0) * 1_000_000).round().astype("int64")
+    pd.to_pickle(d, f); time.sleep(0.04); return d
+
+def step_flow_kis(budget_sec: float = 165):
+    import requests
+    t0 = time.time()
+    old = pd.read_parquet(DST / "investor_flow.parquet")
+    last_old = old.index.get_level_values("date").max(); start = last_old + pd.Timedelta(days=1)
+    px = pd.read_parquet(DST / "prices.parquet", columns=["close"])
+    alive = sorted(px[px.index.get_level_values("date") >= start].index.get_level_values("ticker").unique())
+    done = sum((FLOW_CACHE / f"{t}.pkl").exists() for t in alive)
+    log(f"investor_flow(KIS): 원본 끝 {last_old.date()} → {start.date()}~{END.date()}, 대상 {len(alive)}종목 / 캐시 {done}")
+    # 겹침 대조용: 원본 마지막 45일만 종목별로 잘라 둔다 (종목마다 550만 행을 다시 훑으면 1종목/초로 느려진다 — 실측)
+    tail = old[old.index.get_level_values("date") >= last_old - pd.Timedelta(days=45)]
+    tail_by = {t: g.droplevel("ticker") for t, g in tail.groupby(level="ticker")}
+    sess = requests.Session(); parts, overlap, left = [], [], 0
+    for t in alive:
+        if not (FLOW_CACHE / f"{t}.pkl").exists() and time.time() - t0 > budget_sec:
+            left += 1; continue
+        d = kis_flow_ticker(t, start, END, sess)
+        if d.empty: continue
+        ov = d[d.index <= last_old]
+        if not ov.empty and t in tail_by:
+            o = tail_by[t].reindex(ov.index).dropna()
+            if not o.empty:
+                diff = (o - ov.loc[o.index]).abs().max().max(); overlap.append((t, len(o), diff))
+        n = d[d.index >= start].copy(); n["ticker"] = t
+        parts.append(n.reset_index().set_index(["date", "ticker"]))
+    if left:
+        log(f"시간 예산 소진 — 남은 종목 {left}, 다시 실행하면 이어서 (경과 {int(time.time()-t0)}s, 이번에 받은 {len(parts)})"); return
+    new = pd.concat(parts).sort_index()
+    # 원본(pykrx 전종목 스냅샷) 관례: 거래정지일 행 없음 (2026-06 원본 45,576행 중 거래량 0 행 0). KIS 는 정지일에도 0 행을 주므로
+    # 그날 거래량이 0 이거나 가격 행이 없는 행은 뺀다. 거래가 있는데 네 값이 모두 0 인 행(백만원 반올림, ~1.9%)은 실제 값이라 남긴다.
+    pv = pd.read_parquet(DST / "prices.parquet", columns=["volume"])["volume"].reindex(new.index)
+    halt = pv.isna() | (pv == 0)
+    log(f"  거래정지일 행 제거 {int(halt.sum()):,} (전부 0 {int((halt & (new == 0).all(axis=1)).sum()):,}) · 거래 있는데 전부 0(반올림) {int((~halt & (new == 0).all(axis=1)).sum()):,} 유지")
+    new = new[~halt]
+    allv = pd.concat([old[old.index.get_level_values("date") <= last_old], new]).sort_index()
+    assert not allv.index.duplicated().any()
+    allv.to_parquet(DST / "investor_flow.parquet")
+    ovd = pd.DataFrame(overlap, columns=["ticker", "rows", "maxdiff"])
+    log(f"investor_flow: {len(old):,} + {len(new):,} = {len(allv):,} 행, ~{allv.index.get_level_values('date').max().date()} | 신규 종목 {new.index.get_level_values('ticker').nunique()} · 거래일 {new.index.get_level_values('date').nunique()}")
+    log(f"  겹침 대조(≤{last_old.date()}): {len(ovd)}종목 {int(ovd.rows.sum())}행, |차| ≤ 100만원(반올림 한도) {int((ovd.maxdiff <= 1_000_000).sum())} / 초과 {int((ovd.maxdiff > 1_000_000).sum())} → {ovd[ovd.maxdiff > 1_000_000].head(5).values.tolist()}")
+    ovd.to_csv(DST / "_flow_kis_overlap_check.csv", index=False)
+
 if __name__ == "__main__":
     step = sys.argv[1] if len(sys.argv) > 1 else "report"
-    if step not in ("prices", "trim", "report", "deriv"): krx_login()          # 종목별 OHLCV 는 로그인 없이 된다
-    {"monthly": step_monthly, "indices": step_indices, "flow": step_flow, "prices": step_prices, "trim": step_trim, "report": step_report, "deriv": step_deriv}[step]()
+    if step not in ("prices", "trim", "report", "deriv", "flow_kis"): krx_login()          # 종목별 OHLCV 는 로그인 없이 된다
+    {"monthly": step_monthly, "indices": step_indices, "flow": step_flow, "prices": step_prices, "trim": step_trim, "report": step_report, "deriv": step_deriv, "flow_kis": step_flow_kis}[step]()
