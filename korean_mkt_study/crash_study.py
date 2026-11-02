@@ -279,3 +279,96 @@ def analyze():
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "analyze":
     analyze()
+
+# ═══════════════════════════ 4단계: s 이후 판단 시점 찾기 (데드캣) ═══════════════════════════
+# 판단일 k ∈ {1,2,3} = s+k 종가. 그날까지의 정보만으로 상태를 만들고, 그날 종가 기준 이후 7일의 수익·최대낙폭을 붙인다.
+BOUNCE = 0.03; FWD = 7
+def build_stage4() -> pd.DataFrame:
+    ep = pd.read_parquet(OUT / "episodes.parquet")
+    f3 = pd.read_parquet(OUT / "features.parquet", columns=["ticker", "date", "sig60", "vol_mult_3d", "clv_3d", "gap_share_3d"])
+    ep = ep.merge(f3, on=["ticker", "date"], how="left")
+    px = pd.read_parquet(DATA / "prices.parquet").reset_index(); px = px[px.ticker.isin(ep.ticker.unique())]
+    fl = pd.read_parquet(DATA / "investor_flow.parquet").reset_index(); fl = fl[fl.ticker.isin(ep.ticker.unique())]
+    rows = []
+    fl_by = {t: g.set_index("date")[["외국인", "기관"]] for t, g in fl.groupby("ticker", sort=False)}      # ⚠ 종목마다 560만 행을 거르면 O(n²) — 미리 묶는다
+    ep_by = {t: g for t, g in ep.groupby("ticker", sort=False)}
+    t0 = time.time()
+    for t, d in px.groupby("ticker", sort=False):
+        d = d.sort_values("date").reset_index(drop=True)
+        dates = d.date.to_numpy(); c = d.close.to_numpy(float); o = d.open.to_numpy(float); h = d.high.to_numpy(float); l = d.low.to_numpy(float); v = d.volume.to_numpy(float)
+        flt = fl_by.get(t); flt = flt.reindex(d.date).fillna(0.0) if flt is not None else pd.DataFrame({"외국인": 0.0, "기관": 0.0}, index=d.date)
+        fr, ins = flt["외국인"].to_numpy(float), flt["기관"].to_numpy(float)
+        pos = pd.Series(np.arange(len(d)), index=d.date)
+        r1 = np.concatenate([[np.nan], c[1:] / c[:-1] - 1])
+        for e in ep_by.get(t, pd.DataFrame()).itertuples(index=False):
+            p = int(pos.get(e.date, -1))
+            if p < 3 or p + 3 + 20 >= len(d): continue
+            vol_drop = v[p-2:p+1].mean()                                   # 하락 3일 평균 거래량
+            low_s = l[p-2:p+1].min()
+            for k in (1, 2, 3):
+                q = p + k
+                win = np.arange(p + 1, q + 1)                              # s+1..s+k
+                rr = r1[win]
+                up = rr >= BOUNCE
+                bi = win[np.argmax(rr)] if up.any() else -1               # 가장 큰 반등일
+                st = {"ticker": t, "date": e.date, "k": k, "label": e.label, "year": e.year, "drop_s": e.drop_s, "sig60": e.sig60,
+                      "idx_ret3_s": e.idx_ret3_s, "mkt_co": e.mkt_co,
+                      "ret_s_k": c[q] / c[p] - 1, "cum_p0_k": c[q] / e.p0 - 1,
+                      "n_up": int((rr > 0).sum()), "max_bounce": float(np.nanmax(rr)), "bounce": bool(up.any()),
+                      "consec_down": int(len(rr) - (np.where(rr >= 0)[0].max() + 1) if (rr >= 0).any() else len(rr)),
+                      "newlow_k": bool(c[q] < c[p-2:q].min()), "below_s_low": bool(c[q] < low_s),
+                      "vol_k_ratio": v[q] / vol_drop if vol_drop > 0 else np.nan,
+                      "clv_k": (c[q] - l[q]) / (h[q] - l[q]) if h[q] > l[q] else np.nan,
+                      "frgn_cum_r": fr[p+1:q+1].sum() / max((c[p+1:q+1] * v[p+1:q+1]).sum(), 1),
+                      "inst_cum_r": ins[p+1:q+1].sum() / max((c[p+1:q+1] * v[p+1:q+1]).sum(), 1),
+                      "fwd_ret7": c[q + FWD] / c[q] - 1, "fwd_min7": c[q+1:q+FWD+1].min() / c[q] - 1, "fwd_max7": c[q+1:q+FWD+1].max() / c[q] - 1,
+                      "fwd_ret20": c[q + 20] / c[q] - 1, "fwd_min20": c[q+1:q+21].min() / c[q] - 1}
+                if bi >= 0:
+                    st.update({"b_r1": r1[bi], "b_vol_ratio": v[bi] / vol_drop if vol_drop > 0 else np.nan,
+                               "b_clv": (c[bi] - l[bi]) / (h[bi] - l[bi]) if h[bi] > l[bi] else np.nan,
+                               "b_gap": o[bi] / c[bi-1] - 1, "b_intraday": c[bi] / o[bi] - 1,
+                               "b_age": q - bi, "giveback": (c[q] / c[bi] - 1) if q > bi else np.nan,
+                               "b_frgn_r": fr[bi] / max(c[bi] * v[bi], 1), "b_inst_r": ins[bi] / max(c[bi] * v[bi], 1)})
+                rows.append(st)
+    s4 = pd.DataFrame(rows); s4.to_parquet(OUT / "stage4.parquet"); log(f"stage4: {len(s4):,} 행 (k별 {s4.groupby('k').size().to_dict()}) {int(time.time()-t0)}s")
+    return s4
+
+def analyze_stage4():
+    s4 = pd.read_parquet(OUT / "stage4.parquet"); pd.set_option("display.width", 230)
+    s4["crash"] = s4.label == "crash"; s4["fwd_bad"] = s4.fwd_min7 <= -0.15      # 판단일 이후 7일 내 추가 -15%
+    def tab(df, by, name):
+        g = df.groupby(by, observed=True)
+        t = pd.DataFrame({"건수": g.size(), "crash%": g.crash.mean()*100, "추가-15%": g.fwd_bad.mean()*100,
+                          "이후7일 평균수익%": g.fwd_ret7.mean()*100, "이후7일 중앙%": g.fwd_ret7.median()*100, "이후7일 최대낙폭 평균%": g.fwd_min7.mean()*100})
+        print(f"\n[{name}]"); print(t.round(1).to_string())
+    print("=== (가) 판단일별 기준선 ==="); tab(s4, "k", "k별 전체")
+    print("\n=== (나) 상태별 — 반등이 나왔나 / 연속 하락인가 / 신저가인가 ===")
+    for k in (1, 2, 3):
+        d = s4[s4.k == k]
+        tab(d, "bounce", f"k={k} · 반등(+3%↑) 유무")
+        if k >= 2: tab(d, "consec_down", f"k={k} · s 이후 연속 하락일 수(끝에서)")
+        tab(d, "newlow_k", f"k={k} · 판단일 종가가 s-2 이후 신저가")
+    print("\n=== (다) 반등이 나온 경우 — 반등의 모양 (k=2,3 합산, 반등 다음날 이후 되돌림 포함) ===")
+    b = s4[s4.bounce & (s4.k >= 2)].copy()
+    b["b_vol_t"] = pd.qcut(b.b_vol_ratio, 3, labels=["반등 거래량 적음", "중", "반등 거래량 많음"])
+    b["b_clv_t"] = pd.qcut(b.b_clv, 3, labels=["반등일 저가권 마감", "중", "고가권 마감"])
+    b["gb_t"] = pd.cut(b.giveback, [-1, -0.05, -0.0001, 0.0001, 1], labels=["되돌림 ≤-5%", "되돌림 -5~0", "되돌림 없음(=반등일)", "추가 상승"])
+    b["b_gap_t"] = pd.cut(b.b_gap, [-1, -0.0001, 0.02, 1], labels=["갭다운 출발", "갭 0~2%", "갭업 >2%"])
+    b["b_shape"] = np.where(b.b_intraday > 0.02, "장중 상승형", np.where(b.b_intraday < -0.02, "갭업 후 장중 밀림", "혼합"))
+    for col, nm in (("b_vol_t", "반등일 거래량 / 하락3일 평균"), ("b_clv_t", "반등일 종가 위치"), ("gb_t", "반등 후 되돌림(판단일 종가/반등일 종가)"), ("b_gap_t", "반등일 시가 갭"), ("b_shape", "반등일 모양")):
+        tab(b, col, nm)
+    tab(b, ["b_vol_t", "gb_t"], "거래량 × 되돌림")
+    print("\n=== (라) 반등 없이 연속 하락 — 깊이별 ===")
+    nb = s4[~s4.bounce & (s4.k >= 2)].copy(); nb["ret_t"] = pd.cut(nb.ret_s_k, [-1, -0.10, -0.05, 0, 1], labels=["s 이후 ≤-10%", "-10~-5%", "-5~0%", "s 이후 상승(반등<3%)"])
+    tab(nb, ["k", "ret_t"], "k × s 이후 누적")
+    print("\n=== (마) AUC (crash 기준) — 판단일별 상태 변수 ===")
+    rows = []
+    for k in (1, 2, 3):
+        d = s4[s4.k == k]
+        for col in ("ret_s_k", "cum_p0_k", "max_bounce", "n_up", "consec_down", "vol_k_ratio", "clv_k", "frgn_cum_r", "inst_cum_r", "b_vol_ratio", "b_clv", "giveback", "b_gap", "b_intraday"):
+            if col in d: rows.append((k, col, auc(d[col], d.crash), auc(d[col], d.fwd_bad), d[col].notna().mean()*100))
+    r = pd.DataFrame(rows, columns=["k", "변수", "AUC(crash)", "AUC(추가-15%)", "유효%"]).round(3); print(r.pivot(index="변수", columns="k", values=["AUC(crash)", "AUC(추가-15%)"]).round(3).to_string())
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] in ("stage4", "analyze4"):
+    if sys.argv[1] == "stage4": build_stage4()
+    analyze_stage4()
