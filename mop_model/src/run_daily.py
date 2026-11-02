@@ -24,6 +24,9 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   python3 run_daily.py --lgbm-only        # 속도(단독)
   python3 run_daily.py --target y_intra --signal-dir output/signals_white   # 화이트포트 (2026-09-15)
 
+★ 데이 유니버스 v1.2.2.5 (U7, 2026-11-16~): --rebuild 의 build_panel(today) 가 day_universe 규칙
+  (LLV 멤버 ∩ 20일 평균 거래대금 50억, 2회 연속 미달 편출)으로 종목을 거른다. 신호일 < 11-16 이면 거르지 않음.
+
 ★ 그림자 v2(--variant v2, 2026-10-29 Kane 승인 — WP9 (가)): 데이포트 타깃 그대로, 피처만
   cols.json 의 CHAMPION_V2(146 = wy 2개 제거 + vol_idx 3종 인과 치환)로 학습해
   output/signals_v2 에만 쓴다. 운영 output/signals 는 건드리지 않는다. 데이 그림자 R9 가 읽는다.
@@ -40,6 +43,7 @@ import numpy as np, pandas as pd
 import config as cfg
 from model import fit_predict
 import intra
+import day_universe as DU          # 데이 유니버스 규칙 표기 (v1.2.2.5, U7)
 
 KST = timezone(timedelta(hours=9))
 
@@ -100,7 +104,7 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
     if rebuild:
         from build_panel import build_panel
         from build_features import build_features
-        build_panel()
+        build_panel(today=today)          # 데이 유니버스 규칙(11-16~) 기준일 = 신호일
         build_features()
 
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
@@ -151,6 +155,8 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
         "generated_at": datetime.now(KST).isoformat(timespec="seconds"),
         "top_k": int(top_k),
         "universe_count": int(len(ranking)),
+        "port_version": cfg.DAY_PORT_VERSION,
+        "universe_rule": DU.RULE_ID if str(today.date()) >= DU.ACTIVE_FROM else "LLV 멤버 전체 (규칙 적용 전)",
         "train_meta": meta,
         "ranking": ranking,
     }

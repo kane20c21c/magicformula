@@ -28,7 +28,7 @@ import json, numpy as np, pandas as pd, os
 import config as cfg
 
 
-def build_panel(px=None, save=True):
+def build_panel(px=None, save=True, day_universe=True, today=None):
     """px=None 이면 LLV core+extend parquet 을 읽는다 (운영 기본).
 
     px 를 주면 그 프레임으로 패널을 만든다 — 잠정 당일 행을 붙인 인메모리 실행용
@@ -38,9 +38,10 @@ def build_panel(px=None, save=True):
         os.makedirs(cfg.OUT_DIR, exist_ok=True)
 
     # 1) 섹터 분류 (ticker/name/sector 만)
-    j = json.load(open(cfg.CLASSJ, encoding="utf-8"))
+    # LLV 분류 + sector_overrides.json (케인 지정, 2026-11-03 U7) — classification.py
+    from classification import load_classification
     cls = pd.DataFrame([{"Ticker": v["ticker"], "Name": v["name"], "sector_sub": v["sector"]}
-                        for v in j["classifications"].values()])
+                        for v in load_classification().values()])
     cls["sector_top"] = cls.sector_sub.str.split(".").str[0]
 
     # 2) 주가 병합
@@ -58,6 +59,17 @@ def build_panel(px=None, save=True):
     # 3) ETF/우선주 제외
     drop = px[px.sector_sub.isin(cfg.DROP_SUBSECTORS)].Ticker.unique()
     px = px[~px.Ticker.isin(drop)].copy()
+
+    # 3-1) 데이포트 유니버스 규칙 (v1.2.2.5 — 케인 U7 확정 2026-11-03, 11-16 적용)
+    #   LLV 멤버 ∩ 20일 평균 거래대금 ≥ 50억(만기 주 금요일 점검, 2회 연속 미달 편출). 학습·신호 같은 멤버십 → 횡단면 피처·y_rel 이
+    #   그 유니버스 안에서 계산된다. today(신호 기준일)가 ACTIVE_FROM 이전이면 거르지 않음. run_gauge(섹터 게이지)는 day_universe=False.
+    if day_universe:
+        from day_universe import membership_mask
+        ref = today if today is not None else px.Date.max()
+        m = membership_mask(px, today=ref)
+        if (~m).any():
+            print(f"[panel] 데이 유니버스 규칙: {int((~m).sum()):,}행 제외 (마지막 날 {int((~m[px.Date == px.Date.max()]).sum())}종목)")
+        px = px[m].copy()
 
     # 4) 시작일 컷
     px = px[px.Date >= cfg.START_DATE].sort_values(["Ticker", "Date"]).reset_index(drop=True)

@@ -42,6 +42,22 @@ XS/G1/G5 100개 피처가 `groupby("Date").rank(pct=True)` — 그날 유니버�
 **과거 전 구간 값이 바뀐다** → LLV parquet 의 종목단위 upsert 계약(`_upsert_and_recompute`, `SUPPLY_COLS` 보존)과
 정면충돌. 게다가 lightgbm/catboost 의존성이 LLV 를 import 하는 전 프로젝트로 번진다.
 
+## 데이 유니버스 규칙 — v1.2.2.5 (케인 U7 확정 2026-11-03 · 11-16 적용)
+
+- **데이 유니버스 = LLV 멤버(케인 편입) ∩ 20일 평균 거래대금 ≥ 50억** (`src/day_universe.py`, `RULE_ID`).
+  - 점검: 월 1회 **옵션 만기 주 금요일**(휴장이면 그 주 마지막 거래일) — `check_dates()`.
+  - 편출: 점검에서 **2회 연속** 50억 미달 / 재편입: 점검에서 50억 회복 즉시. 거래대금 결측이면 상태 유지.
+  - 적용: 점검 **다음 거래일부터** 다음 점검일까지 (`membership_mask`, 마스크는 과거 전 구간에도 적용 — 횡단면 피처가 같은 유니버스로 계산되게).
+  - `ACTIVE_FROM = 2026-11-16` — 신호일이 그 전이면 거르지 않는다(v1.1.2.5 동작 그대로).
+  - 관리 범위 190~240 · 대분류 섹터당 5종목 이상(MIN_SECTOR_N — 미만이면 그 섹터 G1 피처 결측) · 시총 상하한 없음.
+- 적용 위치: `build_panel(today=...)` 3-1 단계(ETF·우선주 제외 다음). 섹터 게이지(`run_gauge.py`)는 `day_universe=False` — 게이지는 전 종목.
+  화이트포트·그림자 v2 는 같은 features 를 쓰므로 함께 바뀐다(U7 워크포워드에서 화이트 차이 +0.01%p, t +0.29 확인).
+- **섹터 분류**: `src/classification.py` 가 LLV `ticker_classification.json` 위에 **`sector_overrides.json`(git 추적)** 을 덮어쓴다 —
+  LLV 분류가 없는 17종목 + 바이오 세분화 15종목(케인 지정 2026-11-01). LLV 분류 파일은 git 밖이라 여기 둔다.
+- K7 회차(만기 주 토요일): `python3 src/day_universe.py --report` → `output/day_universe/day_universe_{적용일}.json`
+  (종목 수 · 편출 · 재편입 · 1회 미달 주의 · 섹터 5 미만). `--asof YYYY-MM-DD` 로 과거 점검 재현.
+- 신호 JSON 에 `port_version`(config.DAY_PORT_VERSION) · `universe_rule` 기록.
+
 ## 실행
 
 ```bash

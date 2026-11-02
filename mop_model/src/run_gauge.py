@@ -71,9 +71,10 @@ def _num(x):
 
 def _load_universe():
     """core+extend 이력 + 유니버스 티커 목록 (ETF/우선주 제외) + 이름 정본."""
-    j = json.load(open(cfg.CLASSJ, encoding="utf-8"))
-    sec = {v["ticker"]: v["sector"] for v in j["classifications"].values()}
-    names = {v["ticker"]: v["name"] for v in j["classifications"].values()}
+    from classification import load_classification       # LLV 분류 + sector_overrides.json (2026-11-03)
+    j = load_classification()
+    sec = {t: v["sector"] for t, v in j.items()}
+    names = {t: v["name"] for t, v in j.items()}
     core = pd.read_parquet(cfg.CORE)
     ext = pd.read_parquet(cfg.EXTEND)
     px = pd.concat([core, ext], ignore_index=True)
@@ -136,7 +137,7 @@ def gauge(today=None, use_ensemble=True, notify=True, save=True,
           f"{time.time()-t0:.0f}초 경과)")
 
     # 4) 패널 → 피처 (인메모리)
-    panel = build_panel(px=allpx, save=False)
+    panel = build_panel(px=allpx, save=False, day_universe=False)   # 섹터 게이지는 데이 유니버스 규칙과 무관 (2026-11-03)
     feat = build_features(panel_df=panel, save=False)
     cols = json.load(open(cfg.COLS_JSON))["CHAMPION"]
     lack = [c for c in cols if c not in feat.columns]

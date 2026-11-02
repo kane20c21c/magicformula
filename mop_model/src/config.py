@@ -67,6 +67,8 @@ CAT_NAN = -999   # CatBoost 입력 결측 대체값
 TOP_K = 5                 # 상위 K종목이 1순위 매수 후보
 STRATEGY_ID = "mop_ml_top5"
 MODEL_VERSION = "experiment3-ensemble-v1"
+# 데이포트 버전 (모델.유니버스.진입.청산) — 2026-11-03 케인 U7: 유니버스 2번째(거래대금 50억 규칙 · 섹터 덮어쓰기) → 1.2.2.5 (11-16 적용)
+DAY_PORT_VERSION = "1.2.2.5"
 SCHEMA_VERSION = "1.0"
 
 # ⚠ 소비자(StockPortfolio paper_mop)는 ranking 전체를 받아 NXT 미거래 종목을
