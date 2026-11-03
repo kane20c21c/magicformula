@@ -4,10 +4,12 @@
   드라이브   : sign(r_t) 가 같은 날이 연속 n>=3 일 이어지는 최대 구간. r_t = C_t/C_{t-1}-1. 종가 기준.
                r_t = 0 인 날은 양쪽 모두 드라이브를 끊는다. D1..Dn = 드라이브 날짜, D+1 = 종료 확인일.
   속도 A     : |r_Dn| / |r_D1|            가속 A > 1.8  / 감쇄 A < 0.65
-  거래량 T   : V_Dn / V_D1                 증가 T > 1.25 / 감소 T < 0.75
+  거래량 T   : V_Dn / V_D1                 하락형: 증가 T > 1.25 / 감소 T < 0.75
+                                          상승형: 증가 T > 1.90 / 감소 T < 1.00   (방향별 — 상승 드라이브는 거래량이 따라붙는 게 기본값)
   겹침 ō     : mean_{t=D2..Dn} o_t,  o_t = max(0, min(H_t,H_{t-1}) - max(L_t,L_{t-1})) / (H_t - L_t)
                                           계단 ō < 0.40 / 미끄럼 ō > 0.57
-  경계는 하락형 2016~2026 point-in-time 281,696건의 3분위(0.639/1.833, 0.767/1.277, 0.414/0.571)를 반올림한 고정값.
+  경계는 2016~2026 point-in-time 3분위를 반올림한 고정값. 속도·겹침은 두 방향이 거의 같아 공용
+  (하락형 0.639/1.833, 0.414/0.571 · 상승형 0.524/1.869, 0.421/0.579). 거래량은 다름 (하락형 0.767/1.277 · 상승형 0.970/1.878).
 
 빌더는 point-in-time: k일차(드라이브 진행 중)에 서 있는 모든 (ticker, date) 행을 만들고,
 지표는 D1..Dk 까지의 정보만 쓴다. 사후 컬럼(next_r1, hold10 ...)은 검증용이며 신호 계산에 쓰면 안 된다.
@@ -16,9 +18,10 @@ from __future__ import annotations
 import numpy as np, pandas as pd
 
 THRESH = {  # (하위 경계, 상위 경계)
-    "speed":   (0.65, 1.80),   # 감쇄 / 가속
-    "v_trend": (0.75, 1.25),   # 감소 / 증가
-    "overlap": (0.40, 0.57),   # 계단 / 미끄럼
+    "speed":   (0.65, 1.80),   # 감쇄 / 가속        (공용)
+    "overlap": (0.40, 0.57),   # 계단 / 미끄럼      (공용)
+    "v_trend": {-1: (0.75, 1.25),   # 하락형: 감소 / 증가
+                +1: (1.00, 1.90)},  # 상승형
 }
 LABELS = {
     "speed":   ("감쇄", "평탄", "가속"),
@@ -30,8 +33,13 @@ PRE_WINDOW = 20          # 거래량 정규화: 드라이브 직전 20일 평균
 HOLD_FROM, HOLD_TO = 2, 10   # 사후 타깃: D+2..D+10 종가가 드라이브 끝 종가를 지키는가
 
 
-def classify(x: pd.Series, key: str) -> pd.Series:
-    lo, hi = THRESH[key]; a, b, c = LABELS[key]
+def thresh(key: str, direction: int) -> tuple[float, float]:
+    t = THRESH[key]
+    return t[direction] if isinstance(t, dict) else t
+
+
+def classify(x: pd.Series, key: str, direction: int) -> pd.Series:
+    lo, hi = thresh(key, direction); a, b, c = LABELS[key]
     return pd.Series(np.select([x < lo, x > hi], [a, c], b), index=x.index).where(x.notna()).astype("category")
 
 
@@ -84,7 +92,7 @@ def build_pit(px: pd.DataFrame, direction: int, ks=(3, 4, 5)) -> pd.DataFrame:
     d["hold10"] = (d.ext2_10 >= d.close) if direction < 0 else (d.ext2_10 <= d.close)   # 상승형: 고점 미돌파 = '지킴'
     d["r10"] = (d.c10 / d.close - 1).astype("float32")
     for key in ("speed", "v_trend", "overlap"):
-        d[f"{key}_c"] = classify(d[key], key)
+        d[f"{key}_c"] = classify(d[key], key, direction)
     return d.drop(columns=["c10", "ext2_10"]).reset_index(drop=True)
 
 
