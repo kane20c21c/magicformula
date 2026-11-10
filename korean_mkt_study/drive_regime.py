@@ -1,19 +1,28 @@
-"""드라이브 × 시장 국면 비교 (2026-11-10 케인 — 통일장 국면 라벨 표를 D1 에 붙여 길이·속도·거래량·갭 비교).
+"""드라이브 × 시장 국면 비교 (2026-11-10 케인 — 통일장 국면 라벨 표를 D1 에 붙여 비교).
 
 입력
   드라이브  상승형 out/crash/drive_len_up.parquet (drive_length.build(+1))
            하락형 out/crash/drive_len_down.parquet (drive_length.build(-1) — 없으면 만든다, --rebuild 로 다시)
            정의·유니버스는 drive_types·crash_study 그대로 (전년 거래대금 ≥10억 & 전년말 시총 ≥1,000억, 2016~)
-  국면     MagicFormula output/market_layer/regime_history.parquet (market_layer.attach_regime) — D1 의 라벨
-           lag=0 본 결과, lag=1(D0 라벨) 확인용
+  국면     MagicFormula output/market_layer/regime_history.parquet (market_layer.attach_regime) — **D1 의 라벨**
+           (lag=1 = D0 라벨, 확인용)
+
+구간 (케인 11-10)
+  학습  드라이브 끝 + 10거래일(사후 관측 창)이 2026-05-29 안에 들어오는 것만. 이 파일의 모든 결과는 학습 구간.
+  보류  2026-06-01~ 는 검증용으로 남긴다 — 이 스크립트는 기본으로 보지 않는다 (--holdout 은 검증 때만).
+
+비교 두 묶음
+  모양  길이 P(k+1|k)·평균 길이 · 속도 A · 거래량 T · 거래량 수준 · 겹침 ō · 누적·D1 등락폭 · 가속/증가/계단 비중
+        신뢰구간 = D1 날짜 단위 부트스트랩
+  사후  D+1 (하락형 반등 / 상승형 연장) · D+2..D+10 저점 지킴(하락형) / 고점 재돌파(상승형) · D+10 수익률 r10
+        신뢰구간 = 드라이브 끝 날짜 단위 부트스트랩 (같은 날 끝난 드라이브는 같은 시장 앞날을 맞는다)
+        묶음 = 전체 · 큰 드라이브(누적 ±12% 이상) · 깊은 하락 & D+1 ≥ +3% (DRIVE_STUDY §3.2 조건)
 
 규칙
-  · 2026-09-14 이후에 끝난 드라이브 제외 — prices.parquet 종가가 애프터마켓 개장 뒤 정규장 종가와 어긋남 (breadth_study 주석)
-  · 드라이브 '건수' 비교는 하지 않는다 — 브레드스가 곧 상승·하락 종목 수라 순환. 성질(길이·속도·거래량·갭)만 비교
-  · 신뢰구간 = D1 날짜 단위 부트스트랩 (같은 날 시작한 드라이브는 독립이 아니다). 국면 라벨은 날짜마다 하나라
-    국면 그룹이 날짜를 나누므로 그룹별로 따로 뽑는다
-  · 길이 n 은 사후값 — 이 표는 '설명' 용도, 신호 아님
-출력: out/regime/drive_regime_*.csv · 표준출력 요약
+  · 드라이브 '건수' 비교는 하지 않는다 — 브레드스가 곧 상승·하락 종목 수라 순환
+  · 국면 라벨은 날짜마다 하나 → 국면 그룹이 날짜를 나누므로 그룹별로 따로 뽑는다
+  · 길이 n·사후값은 설명 용도. 신호로 쓰려면 보류 구간 검증이 먼저다
+출력: out/regime/drive_regime_shape.csv · drive_regime_outcome.csv · drive_regime_type.csv
 """
 from __future__ import annotations
 import sys, time
@@ -25,142 +34,170 @@ sys.path[:0] = [str(HERE), str(HERE.parent)]
 from crash_study import OUT                                     # noqa: E402
 from market_layer import attach_regime, load_history            # noqa: E402
 
-CUT = pd.Timestamp("2026-09-14")
+LEARN_END = pd.Timestamp("2026-05-29")      # 학습 끝 (보류 = 2026-06-01~, 케인 11-10)
+HOLD_START = pd.Timestamp("2026-06-01")
+PX_CUT = pd.Timestamp("2026-09-14")         # prices.parquet 종가가 이 날부터 정규장과 어긋남 (breadth_study 주석)
+POST = 10
 ROUT = HERE / "out" / "regime"
 NB = 1000
 RNG = np.random.default_rng(20261110)
-AXES = {"breadth": {True: "상승", False: "하락"}, "c2": {True: "보유", False: "퇴출"}}
-PERIODS = {"전체": ("2016-01-01", "2026-09-13"), "2016~2020": ("2016-01-01", "2020-12-31"), "2021~2026.09": ("2021-01-01", "2026-09-13")}
+DEEP = 0.12
+AXES = {"breadth": {True: "상승", False: "하락"}, "c2": {True: "보유", False: "퇴출"},
+        "regime": {x: x for x in ["상승·보유", "상승·퇴출", "하락·보유", "하락·퇴출"]},
+        "gate_window": {True: "갭쇼크창 안", False: "갭쇼크창 밖"}}
+PERIODS = {"전체": ("2016-01-01", "2026-05-29"), "2016~2020": ("2016-01-01", "2020-12-31"),
+           "2021~2026.05": ("2021-01-01", "2026-05-29")}
 
 
-def load_drives(rebuild: bool = False) -> dict[str, pd.DataFrame]:
+def load_drives(hist: pd.DataFrame, rebuild: bool = False, holdout: bool = False) -> dict[str, pd.DataFrame]:
     up = pd.read_parquet(OUT / "drive_len_up.parquet")
     p = OUT / "drive_len_down.parquet"
     if rebuild or not p.exists():
         import drive_length
-        dn = drive_length.build(-1); dn.to_parquet(p)
+        drive_length.build(-1).to_parquet(p)
     dn = pd.read_parquet(p)
+    days = hist.index
     out = {}
     for name, d in (("상승형", up), ("하락형", dn)):
-        d = d[pd.to_datetime(d.date_end) < CUT].copy()
-        d["date"] = pd.to_datetime(d.date)
+        d = d.copy()
+        d["date"] = pd.to_datetime(d.date); d["date_end"] = pd.to_datetime(d.date_end)
+        pos = days.searchsorted(d.date_end.values)
+        ok = pos + POST < len(days)
+        post_end = pd.Series(pd.NaT, index=d.index, dtype="datetime64[ns]")
+        post_end[ok] = days[pos[ok] + POST]
+        d["post_end"] = post_end
+        if holdout:
+            d = d[(d.date >= HOLD_START) & (d.post_end < PX_CUT)]
+        else:
+            d = d[d.post_end.notna() & (d.post_end <= LEARN_END)]
         out[name] = d
     return out
 
 
-# ── 지표: 드라이브마다 (분자, 분모) — 날짜별로 더해 두면 부트스트랩이 빠르다 ─────────────────
-def per_drive(d: pd.DataFrame) -> pd.DataFrame:
-    n = d.n.astype(int)
-    m = pd.DataFrame(index=d.index)
-    for k in (3, 4, 5, 6):
-        m[f"P{k + 1}|{k}_n"] = (n >= k + 1).astype(float); m[f"P{k + 1}|{k}_d"] = (n >= k).astype(float)
-    m["평균길이_n"] = n.astype(float); m["평균길이_d"] = 1.0
-    for col, nm in (("speed", "속도A(기하)"), ("v_trend", "거래량T(기하)"), ("v_level", "거래량수준(기하)")):
-        x = np.log(d[col].where(d[col] > 0))
-        m[f"{nm}_n"] = x.fillna(0.0); m[f"{nm}_d"] = x.notna().astype(float)
-    for col, nm in (("overlap", "겹침ō(평균)"),):
-        m[f"{nm}_n"] = d[col].fillna(0.0); m[f"{nm}_d"] = d[col].notna().astype(float)
-    m["누적|등락|_n"] = d.tot.abs().fillna(0.0); m["누적|등락|_d"] = d.tot.notna().astype(float)
-    m["D1|등락|_n"] = d.r_d1.abs().fillna(0.0); m["D1|등락|_d"] = d.r_d1.notna().astype(float)
-    for col, lab, nm in (("speed_c", "가속", "가속%"), ("v_trend_c", "증가", "증가%"), ("overlap_c", "계단", "계단%")):
-        ok = d[col].notna()
-        m[f"{nm}_n"] = (d[col].astype(str) == lab).astype(float) * ok; m[f"{nm}_d"] = ok.astype(float)
-    return m
+# ── 지표 정의: (이름, 함수(d, 방향) → (분자, 분모), 종류) ────────────────────────────────
+def _rate(mask, ok=None):
+    ok = pd.Series(True, index=mask.index) if ok is None else ok
+    return (mask & ok).astype(float), ok.astype(float)
 
 
-METRICS = ["P4|3", "P5|4", "P6|5", "P7|6", "평균길이", "속도A(기하)", "거래량T(기하)", "거래량수준(기하)", "겹침ō(평균)",
-           "누적|등락|", "D1|등락|", "가속%", "증가%", "계단%"]
-GEO = {"속도A(기하)", "거래량T(기하)", "거래량수준(기하)"}
-PCT = {"P4|3", "P5|4", "P6|5", "P7|6", "가속%", "증가%", "계단%", "누적|등락|", "D1|등락|"}
+def _mean(x):
+    return x.fillna(0.0), x.notna().astype(float)
 
 
-def finish(name: str, num, den):
+def _geo(x):
+    return _mean(np.log(x.where(x > 0)))
+
+
+SHAPE = [("P4|3", lambda d, s: _rate(d.n >= 4), "rate"),
+         ("P5|4", lambda d, s: _rate(d.n >= 5, d.n >= 4), "rate"),
+         ("P6|5", lambda d, s: _rate(d.n >= 6, d.n >= 5), "rate"),
+         ("평균길이", lambda d, s: _mean(d.n.astype(float)), "mean"),
+         ("속도A", lambda d, s: _geo(d.speed), "geo"),
+         ("거래량T", lambda d, s: _geo(d.v_trend), "geo"),
+         ("거래량수준", lambda d, s: _geo(d.v_level), "geo"),
+         ("겹침ō", lambda d, s: _mean(d.overlap), "mean"),
+         ("누적|등락|", lambda d, s: _mean(d.tot.abs()), "pct"),
+         ("가속%", lambda d, s: _rate(d.speed_c.astype(str) == "가속", d.speed_c.notna()), "rate"),
+         ("증가%", lambda d, s: _rate(d.v_trend_c.astype(str) == "증가", d.v_trend_c.notna()), "rate"),
+         ("계단%", lambda d, s: _rate(d.overlap_c.astype(str) == "계단", d.overlap_c.notna()), "rate")]
+# D+1 은 끝난 드라이브만 모았으므로 방향이 늘 반대(또는 0) — 크기만 본다 (하락형 = 반등 폭, 상승형 = 되밀림 폭)
+OUTCOME = [("D+1평균", lambda d, s: _mean(d.next_r1), "pct"),
+           ("지킴/재돌파%", lambda d, s: _rate(d.rebreak.astype(bool)), "rate"),
+           ("r10평균", lambda d, s: _mean(d.r10), "pct"),
+           ("r10>0%", lambda d, s: _rate(d.r10 > 0, d.r10.notna()), "rate")]
+# 지킴/재돌파 — drive_length 의 rebreak: 하락형 = D+2..10 최저 종가 > 끝 종가(저점 지킴) / 상승형 = 최고 종가 > 끝 종가(고점 재돌파)
+
+
+def per_drive(d: pd.DataFrame, s: int, metrics) -> pd.DataFrame:
+    cols = {}
+    for nm, f, _ in metrics:
+        a, b = f(d, s)
+        cols[f"{nm}_n"], cols[f"{nm}_d"] = a.to_numpy(float), b.to_numpy(float)
+    return pd.DataFrame(cols, index=d.index)
+
+
+def finish(kind, num, den):
     v = num / den
-    return np.exp(v) if name in GEO else v
+    return np.exp(v) if kind == "geo" else v
 
 
-def daily_sums(d: pd.DataFrame) -> pd.DataFrame:
-    return per_drive(d).groupby(d.date.values).sum()
+def stats(d: pd.DataFrame, s: int, metrics, cluster: str) -> tuple[dict, dict]:
+    day = per_drive(d, s, metrics).groupby(d[cluster].values).sum()
+    tot = day.sum()
+    point = {"드라이브": len(d), "군집": day.shape[0]}
+    for nm, _, k in metrics:
+        point[nm] = finish(k, tot[f"{nm}_n"], tot[f"{nm}_d"])
+    a = day.to_numpy(); cols = list(day.columns)
+    idx = RNG.integers(0, len(a), size=(NB, len(a)))
+    sm = a[idx].sum(axis=1)
+    bs = {nm: finish(k, sm[:, cols.index(f"{nm}_n")], sm[:, cols.index(f"{nm}_d")]) for nm, _, k in metrics}
+    return point, bs
 
 
-def boot(day: pd.DataFrame) -> dict[str, np.ndarray]:
-    """날짜 재추출 NB 회 → 지표별 분포."""
-    a = day.to_numpy(); n = len(a)
-    idx = RNG.integers(0, n, size=(NB, n))
-    s = a[idx].sum(axis=1)                                    # (NB, 열)
-    cols = list(day.columns)
-    return {mname: finish(mname, s[:, cols.index(f"{mname}_n")], s[:, cols.index(f"{mname}_d")]) for mname in METRICS}
-
-
-def group_table(d: pd.DataFrame, key: str, labels: dict) -> tuple[pd.DataFrame, dict]:
+def compare(d: pd.DataFrame, s: int, axis: str, metrics, cluster: str, min_n: int = 30) -> pd.DataFrame:
+    labels = AXES[axis]
+    dd = d.dropna(subset=[axis])
     rows, bs = {}, {}
     for v, lab in labels.items():
-        g = d[d[key] == v]
-        if g.empty:
+        g = dd[dd[axis] == v]
+        if len(g) < min_n:
             continue
-        day = daily_sums(g)
-        tot = day.sum()
-        r = {"드라이브": len(g), "D1 날짜": day.shape[0]}
-        for mname in METRICS:
-            r[mname] = finish(mname, tot[f"{mname}_n"], tot[f"{mname}_d"])
-        rows[lab] = r; bs[lab] = boot(day)
-    return pd.DataFrame(rows).T, bs
+        rows[lab], bs[lab] = stats(g, s, metrics, cluster)
+    t = pd.DataFrame(rows).T
+    labs = [x for x in labels.values() if x in bs]
+    if len(labels) == 2 and len(labs) == 2:
+        a, b = labs
+        names = [m[0] for m in metrics]
+        t.loc[f"차({a}−{b})"] = [np.nan, np.nan] + [t.loc[a, m] - t.loc[b, m] for m in names]
+        t.loc["CI하"] = [np.nan, np.nan] + [np.percentile(bs[a][m] - bs[b][m], 2.5) for m in names]
+        t.loc["CI상"] = [np.nan, np.nan] + [np.percentile(bs[a][m] - bs[b][m], 97.5) for m in names]
+    return t
 
 
-def diff_ci(bs: dict, a: str, b: str) -> pd.Series:
-    out = {}
-    for mname in METRICS:
-        x = bs[a][mname] - bs[b][mname]
-        lo, hi = np.percentile(x, [2.5, 97.5])
-        out[mname] = (lo, hi)
-    return pd.Series(out)
+SUBSETS = {"전체": lambda d, s: d,
+           "큰 드라이브(±12%↑)": lambda d, s: d[d.tot * s >= DEEP],
+           "깊은 하락 & D+1≥3%": lambda d, s: d[(d.tot <= -DEEP) & (d.next_r1 >= 0.03)] if s < 0 else d.iloc[0:0]}
 
 
-def fmt(t: pd.DataFrame) -> pd.DataFrame:
-    f = t.copy().astype(object)
-    for c in t.columns:
-        if c in ("드라이브", "D1 날짜"):
-            f[c] = t[c].map(lambda x: f"{int(x):,}")
-        elif c in PCT:
-            f[c] = t[c].map(lambda x: f"{x * 100:.1f}%")
-        else:
-            f[c] = t[c].map(lambda x: f"{x:.3f}")
-    return f
-
-
-def run(lag: int, drives: dict, hist: pd.DataFrame, period: str = "전체", verbose: bool = True):
-    a, b = PERIODS[period]
-    res = []
-    for dname, d0 in drives.items():
-        d = attach_regime(d0, "date", cols=["breadth", "c2", "regime", "gate_window"], hist=hist, lag=lag, prefix="")
-        d = d[(d.date >= a) & (d.date <= b)]
-        for axis, labels in list(AXES.items()) + [("regime", {x: x for x in ["상승·보유", "상승·퇴출", "하락·보유", "하락·퇴출"]}),
-                                                   ("gate_window", {True: "갭쇼크창 안", False: "갭쇼크창 밖"})]:
-            dd = d.dropna(subset=[axis])
-            t, bs = group_table(dd, axis, labels)
-            labs = list(labels.values())
-            if len(labs) == 2 and all(x in bs for x in labs):
-                ci = diff_ci(bs, labs[0], labs[1])
-                diff = t.loc[labs[0], METRICS] - t.loc[labs[1], METRICS]
-                t.loc[f"차({labs[0]}−{labs[1]})"] = [np.nan, np.nan] + list(diff.values)
-                t.loc["95%CI 하"] = [np.nan, np.nan] + [ci[m][0] for m in METRICS]
-                t.loc["95%CI 상"] = [np.nan, np.nan] + [ci[m][1] for m in METRICS]
-            t.insert(0, "축", axis); t.insert(0, "드라이브형", dname); t.insert(0, "lag", lag); t.insert(0, "기간", period)
-            res.append(t.reset_index(names="그룹"))
-    return pd.concat(res, ignore_index=True)
+def run(drives: dict, hist: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    shape, outc, typ = [], [], []
+    for lag in (0, 1):
+        for dname, d0 in drives.items():
+            s = +1 if dname == "상승형" else -1
+            d = attach_regime(d0, "date", cols=list(AXES), hist=hist, lag=lag, prefix="")
+            for per, (a, b) in PERIODS.items():
+                dp = d[(d.date >= a) & (d.date <= b)]
+                for axis in AXES:
+                    t = compare(dp, s, axis, SHAPE, "date")
+                    shape.append(t.assign(기간=per, lag=lag, 드라이브형=dname, 축=axis).reset_index(names="그룹"))
+                    for sub, f in SUBSETS.items():
+                        ds = f(dp, s)
+                        if ds.empty:
+                            continue
+                        t = compare(ds, s, axis, OUTCOME, "date_end")
+                        outc.append(t.assign(기간=per, lag=lag, 드라이브형=dname, 축=axis, 묶음=sub).reset_index(names="그룹"))
+    # 유형 × C2 — 깊은 하락 & D+1≥3% 안에서 (DRIVE_STUDY §3.2 표가 국면에 따라 달라지나)
+    d = attach_regime(drives["하락형"], "date", cols=["c2", "breadth"], hist=hist, prefix="")
+    ds = d[(d.tot <= -DEEP) & (d.next_r1 >= 0.03)].dropna(subset=["c2"])
+    for (ov, vt), g in ds.groupby([ds.overlap_c.astype(str), ds.v_trend_c.astype(str)]):
+        for c2v, gg in g.groupby("c2"):
+            typ.append({"겹침": ov, "거래량": vt, "C2": "보유" if c2v else "퇴출", "건수": len(gg),
+                        "저점지킴%": gg.rebreak.mean() * 100, "r10평균%": gg.r10.mean() * 100})
+    return (pd.concat(shape, ignore_index=True), pd.concat(outc, ignore_index=True), pd.DataFrame(typ))
 
 
 if __name__ == "__main__":
     t0 = time.time()
-    drives = load_drives("--rebuild" in sys.argv)
     hist = load_history()
+    drives = load_drives(hist, "--rebuild" in sys.argv, holdout="--holdout" in sys.argv)
+    if "--holdout" in sys.argv:
+        print("⚠ 보류 구간(2026-06~) — 검증 때만 쓴다"); PERIODS.clear(); PERIODS["보류"] = ("2026-06-01", "2026-09-13")
     for k, d in drives.items():
-        print(f"{k}: {len(d):,} 드라이브 · D1 {d.date.min():%Y-%m-%d}~{d.date.max():%Y-%m-%d}")
+        print(f"{k}: {len(d):,} 드라이브 · D1 {d.date.min():%Y-%m-%d}~{d.date.max():%Y-%m-%d} · 사후 창 끝 ≤ {d.post_end.max():%Y-%m-%d}")
+    S, O, T = run(drives, hist)
     ROUT.mkdir(parents=True, exist_ok=True)
-    allres = []
-    for lag in (0, 1):
-        for period in PERIODS:
-            allres.append(run(lag, drives, hist, period))
-    R = pd.concat(allres, ignore_index=True)
-    R.to_csv(ROUT / "drive_regime_all.csv", index=False)
-    print(f"저장 {ROUT / 'drive_regime_all.csv'} · {time.time() - t0:.0f}s")
+    tag = "_holdout" if "--holdout" in sys.argv else ""
+    S.to_csv(ROUT / f"drive_regime_shape{tag}.csv", index=False)
+    O.to_csv(ROUT / f"drive_regime_outcome{tag}.csv", index=False)
+    T.to_csv(ROUT / f"drive_regime_type{tag}.csv", index=False)
+    print(f"저장 {ROUT} · {time.time() - t0:.0f}s")
