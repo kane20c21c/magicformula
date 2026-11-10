@@ -176,6 +176,14 @@ stop3: 일 +0.208 · Sharpe 2.20 · MDD −12.7 · 최악일 −3.2(저가 근�
 
 ---
 
+## 통일장 시장 층 판정기 — `market_layer/` v1.0 (2026-11-10~, 그림자 단계)
+
+매매 룰이 아니라 **포트 위에 얹는 노출 판정**(보유/현금)이다. ⑦ C2+갭쇼크 = 운영 후보, ⑤ = 그림자 기록 (케인 11-10).
+재료는 LLV 읽기 전용 — 코스피 200 · KRX 중형 TMI · 시장 브레드스(전 종목, LLV `market_breadth`).
+실행 `scripts/market_layer_signal.py` → `output/market_layer/YYYYMMDD.json` (19:10 잠정 / 다음 날 아침 확정, 같은 파일).
+⚠ 판정일 아닌 날의 재료 결측은 `InputGapError` 로 멈춘다 (200일선이 조용히 얼어붙는 사고 방지).
+⚠ 실행 시각 연결·알림·그림자 포트 비교(③)는 아직 — 정본·함정은 `market_layer/README.md`.
+
 ## 스케줄 (평일, KST — 정본은 `StockPortfolio/SCHEDULED_TASKS.md`)
 
 | 시각 | 룰 | 내용 |
