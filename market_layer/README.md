@@ -24,6 +24,9 @@ True = 보유, False = 현금. 종목 고르기(스윙·데이 포트)와는 독
 
 같은 날 파일에 `provisional` · `confirmed` 블록을 따로 두고, 둘 다 있으면 `provisional_matches_confirmed` 를 기록한다.
 
+실행: SP 저녁 체인 **12단계**(19:00대, 잠정) · **08:40** `com.stolab.magicformula-market-layer-confirm`(`--confirm` — 확정 재료가 없으면 쓰지 않고 exit 1).
+소비자: SP **유스윙포트**(`app/uswing`, 케인 11-10) — 직전 거래일 판정(확정 우선)으로 09:10 매수/전량 매도/보류를 정한다. 알림도 SP 가 보낸다.
+
 ## 함정
 
 - ⚠ **판정일이 아닌 날의 재료 결측은 사고다.** 200일선 창에 하루라도 빠지면 그 뒤 199일 이평이 비어 상태가 조용히 얼어붙는다 —

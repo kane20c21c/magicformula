@@ -182,7 +182,8 @@ stop3: 일 +0.208 · Sharpe 2.20 · MDD −12.7 · 최악일 −3.2(저가 근�
 재료는 LLV 읽기 전용 — 코스피 200 · KRX 중형 TMI · 시장 브레드스(전 종목, LLV `market_breadth`).
 실행 `scripts/market_layer_signal.py` → `output/market_layer/YYYYMMDD.json` (19:10 잠정 / 다음 날 아침 확정, 같은 파일).
 ⚠ 판정일 아닌 날의 재료 결측은 `InputGapError` 로 멈춘다 (200일선이 조용히 얼어붙는 사고 방지).
-⚠ 실행 시각 연결·알림·그림자 포트 비교(③)는 아직 — 정본·함정은 `market_layer/README.md`.
+실행 = SP 저녁 체인 12단계(잠정) · 08:40 `magicformula-market-layer-confirm`(확정). 소비자 = SP **유스윙포트**(원 스윙 + ⑦ 게이트, 케인 11-10) — 정본·함정은 `market_layer/README.md`.
+⚠ 데이포트·화이트포트 통일장 버전은 **연구 과제** (실제 데이포트 규칙에 ⑦ 을 얹은 검정 없음 — 유데이포트 보류).
 
 ## 스케줄 (평일, KST — 정본은 `StockPortfolio/SCHEDULED_TASKS.md`)
 

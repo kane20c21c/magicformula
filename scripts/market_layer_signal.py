@@ -5,11 +5,14 @@
     python3 scripts/market_layer_signal.py              # LLV 코스피 200 마지막 날 기준 (휴장 가드)
     python3 scripts/market_layer_signal.py 20261109     # 특정 날짜
     python3 scripts/market_layer_signal.py --dry-run    # 저장 없이 출력만
+    python3 scripts/market_layer_signal.py --confirm    # 아침 확정 배치 (08:40) — 확정 재료가 없으면 쓰지 않고 exit 1
 
 단계는 재료가 정한다 — 판정일의 TMI·브레드스가 모두 KRX 확정이면 '확정', 하나라도 잠정이면 '잠정'.
   19:10 저녁 판정  : 브레드스 = 한국투자 잠정, TMI = 전날 200일선 상태 유지 → 잠정
   다음 날 아침 재판정: 08:01 LLV 가 KRX 확정치를 채운 뒤 → 확정 (같은 파일에 덧붙이고 잠정과 같은지 기록)
-출력 = output/market_layer/YYYYMMDD.json  — 실행 시각 연결·알림은 ③ 그림자 추적과 함께 따로 붙인다.
+출력 = output/market_layer/YYYYMMDD.json
+실행 = SP 저녁 체인 12단계(잠정) · 08:40 com.stolab.magicformula-market-layer-confirm(--confirm, 확정)
+소비자 = SP 유스윙포트(app/uswing — 다음 거래일 09:10 게이트) · 알림도 SP 가 보낸다.
 재료 결측(판정일 아닌 날) = InputGapError → exit 1 (배치 실패로 드러나게).
 """
 from __future__ import annotations
@@ -92,8 +95,13 @@ def main(argv: list[str]) -> int:
         inp = load_inputs(target)
     except InputGapError as e:
         print(f"✗ 판정 보류 — {e}"); return 1
-    d = judge(inp.k_open, inp.k_close, inp.tmi, inp.ratio)
     stage = "provisional" if inp.source["provisional"] else "confirmed"
+    if "--confirm" in flags and stage != "confirmed":
+        # 아침 확정 배치(08:40) — 확정 재료가 아직 없으면 쓰지 않는다. 덮으면 19:10 잠정 블록이 아침 잠정으로 바뀐다.
+        print(f"✗ {inp.as_of:%Y-%m-%d} 확정 재료 아직 없음 — 브레드스: {inp.source['breadth']} · TMI: {inp.source['tmi']}"
+              " (LLV 08:01 daily_update 확인)")
+        return 1
+    d = judge(inp.k_open, inp.k_close, inp.tmi, inp.ratio)
     block = build_block(inp, d)
     as_of = inp.as_of.strftime("%Y-%m-%d")
     print(f"통일장 시장 층 {DEFAULT.version} · {as_of} · {'잠정' if stage == 'provisional' else '확정'}")
