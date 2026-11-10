@@ -10,6 +10,7 @@
 입력 = LLV data/ohlcv/panel.parquet (수정주가, 20:30 확정) 에서 ETF 섹터 제외.
 출력 = output/signals_bounce/YYYYMMDD.json — 그날 끝난 드라이브 전부(signal·deadcat 플래그) + 메타.
 메일 = 신호가 1건 이상일 때만 (GMAIL_*/ALERT_EMAIL — mop_model gauge_notify 와 같은 .env). 실패해도 JSON 은 남는다.
+시장 국면 = 신호일의 통일장 브레드스·C2 (bounce_rule/regime.py) — 메일·JSON 에 **표기만** 한다 (케인 2026-11-10 (가), DRIVE_STUDY §9).
 """
 from __future__ import annotations
 import json, sys, logging
@@ -20,7 +21,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]; STOLAB_ROOT = PROJECT_ROOT.parent
 for p in (PROJECT_ROOT, STOLAB_ROOT / "LongLiveVault", PROJECT_ROOT / "mop_model" / "src"):
     if str(p) not in sys.path: sys.path.insert(0, str(p))
-from bounce_rule import scan_drives, DEFAULT                       # noqa: E402
+from bounce_rule import scan_drives, DEFAULT, market_regime, regime_html   # noqa: E402
 PANEL = STOLAB_ROOT / "LongLiveVault" / "data" / "ohlcv" / "panel.parquet"
 OUT_DIR = PROJECT_ROOT / "output" / "signals_bounce"
 RED, BLUE = "#ef5350", "#1976D2"
@@ -44,7 +45,7 @@ def fmt_pct(x: float) -> str:
     return f'<span style="color:{color}">{x*100:+.1f}%</span>'
 
 
-def build_mail(df: pd.DataFrame, asof: str) -> tuple[str, str]:
+def build_mail(df: pd.DataFrame, asof: str, reg: dict | None = None) -> tuple[str, str]:
     sig = df[df.signal]
     next_note = "내일 09:00 시가 진입 후보 · 권고 보유 5거래일 · 저점(마지막 하락일 종가) 종가 이탈 시 익일 시가 정리"
     rows = "".join(
@@ -59,12 +60,14 @@ def build_mail(df: pd.DataFrame, asof: str) -> tuple[str, str]:
         for r in others.itertuples())
     html = f"""<div style="font-family:-apple-system,sans-serif;font-size:14px">
 <h3>반등 룰 신호 — {asof} 종가 기준 · {len(sig)}건</h3><p>{next_note}</p>
+{regime_html(reg)}
 <table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>종목</th><th>이름</th><th>드라이브</th><th>낙폭</th><th>D+1</th><th>강도</th><th>저점(종가)</th></tr>{rows}</table>
 <p style="margin-top:14px;color:#666">같은 날 끝난 다른 드라이브 (참고, 신호 아님)</p>
 <table border="1" cellpadding="4" style="border-collapse:collapse;color:#666"><tr><th>종목</th><th>이름</th><th>드라이브</th><th>낙폭</th><th>D+1</th><th>강도</th><th></th></tr>{rows2}</table>
 <p style="color:#999;font-size:12px">규칙 {DEFAULT.version}: 3일↑ 연속 하락 드라이브 종료 · 낙폭 ≤ −20% · D+1 ≥ 1.65σ60. 근거 MagicFormula/bounce_rule/README.md</p></div>"""
     names = sig.name.tolist(); head = ", ".join(names[:5]) + (f" 외 {len(names)-5}" if len(names) > 5 else "")
-    return f"[반등 룰] {asof} 신호 {len(sig)}건 — {head}", html
+    tag = f" · 브레드스 {reg['breadth']}" if reg and reg.get("breadth") else ""
+    return f"[반등 룰] {asof} 신호 {len(sig)}건{tag} — {head}", html
 
 
 def main(argv: list[str]) -> int:
@@ -87,18 +90,20 @@ def main(argv: list[str]) -> int:
     pd.set_option("display.width", 200)
     print(f"반등 룰 {DEFAULT.version} · {asof.date()} · 패널 {panel.Ticker.nunique()}종목 · 끝난 드라이브 {len(df)}건 · 신호 {len(sig)}건")
     print(df.to_string(index=False) if len(df) else "(끝난 드라이브 없음)")
+    reg = market_regime(asof)                                    # 신호일 시장 국면 — 표기만 (케인 11-10 (가))
+    print("시장 국면:", reg if reg else "판정 없음")
     if "--dry-run" in flags: return 0
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = {"version": DEFAULT.version, "as_of": asof.strftime("%Y-%m-%d"), "generated_at": datetime.now().isoformat(timespec="seconds"),
            "rule": {"min_drive_days": DEFAULT.min_drive_days, "min_drop": DEFAULT.min_drop, "strong_sigma": DEFAULT.strong_sigma, "deadcat_sigma": DEFAULT.deadcat_sigma, "sigma_window": DEFAULT.sigma_window},
-           "entry": "next_open", "hold_days": DEFAULT.hold_days, "signals": sig.to_dict(orient="records"), "ended_drives": df.to_dict(orient="records")}
+           "entry": "next_open", "hold_days": DEFAULT.hold_days, "market_regime": reg, "signals": sig.to_dict(orient="records"), "ended_drives": df.to_dict(orient="records")}
     path = OUT_DIR / f"{asof.strftime('%Y%m%d')}.json"
     tmp = path.with_suffix(".json.tmp"); tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8"); tmp.replace(path)
     print(f"저장: {path}")
     if len(sig) and "--no-mail" not in flags:
         try:
             from gauge_notify import send_email
-            subject, html = build_mail(df, asof.strftime("%Y-%m-%d"))
+            subject, html = build_mail(df, asof.strftime("%Y-%m-%d"), reg)
             print("메일:", "발송" if send_email(subject, html) else "실패(미설정 또는 오류) — JSON 은 저장됨")
         except Exception as e:
             print(f"메일 모듈 실패({e}) — JSON 은 저장됨")

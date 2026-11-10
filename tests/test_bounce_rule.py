@@ -73,3 +73,43 @@ def test_reproduces_research_on_a_signal_day():
     out = scan_drives(px_all, asof=d1)
     got = set(out[out.signal].ticker)
     assert expect <= got, f"연구 신호 {len(expect)} 중 운영 누락 {sorted(expect - got)[:5]}"
+
+
+# ── 신호일 시장 국면 표기 (2026-11-10 케인 (가)) ──────────────────────────────────
+import json as _json  # noqa: E402
+from bounce_rule.regime import market_regime, regime_html  # noqa: E402
+
+
+def _ml_json(d, day, prov=None, conf=None):
+    j = {"as_of": day, "provisional": None, "confirmed": None}
+    if prov: j["provisional"] = {"components": prov}
+    if conf: j["confirmed"] = {"components": conf}
+    (d / f"{day.replace('-', '')}.json").write_text(_json.dumps(j, ensure_ascii=False), encoding="utf-8")
+
+
+def test_regime_prefers_confirmed_then_provisional(tmp_path):
+    _ml_json(tmp_path, "2026-11-10", prov={"breadth": "하락", "c2": "보유", "breadth_value": -0.06},
+             conf={"breadth": "상승", "c2": "퇴출", "breadth_value": 0.06})
+    r = market_regime("2026-11-10", tmp_path)
+    assert r["stage"] == "확정" and r["breadth"] == "상승" and r["c2"] == "퇴출"
+    _ml_json(tmp_path, "2026-11-11", prov={"breadth": "하락", "c2": "보유", "breadth_value": -0.06})
+    r = market_regime("2026-11-11", tmp_path)
+    assert r["stage"] == "잠정" and r["breadth"] == "하락"
+
+
+def test_regime_falls_back_to_history_then_none(tmp_path):
+    idx = pd.to_datetime(["2026-11-06", "2026-11-09"])
+    h = pd.DataFrame({"breadth": pd.array([True, pd.NA], dtype="boolean"), "c2": pd.array([False, True], dtype="boolean"),
+                      "breadth_value": [0.07, np.nan]}, index=idx)
+    h.to_parquet(tmp_path / "regime_history.parquet")
+    r = market_regime("2026-11-06", tmp_path)
+    assert r == {"breadth": "상승", "c2": "퇴출", "stage": "이력", "breadth_value": 0.07}
+    assert market_regime("2026-11-09", tmp_path) is None          # 브레드스 결측(유효 구간 밖) → 없음
+    assert market_regime("2026-11-12", tmp_path) is None
+
+
+def test_regime_html_warns_only_on_breadth_up():
+    up = regime_html({"breadth": "상승", "c2": "보유", "stage": "잠정"})
+    dn = regime_html({"breadth": "하락", "c2": "보유", "stage": "잠정"})
+    assert "⚠" in up and "40.0%" in up and "⚠" not in dn
+    assert "판정 없음" in regime_html(None)
