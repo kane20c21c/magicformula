@@ -21,13 +21,30 @@ import backtest as bt
 CAP, SLOT, NSLOT, MAXPER, COOL = 1e8, 1e7, 10, 2, 1
 BUY_FEE, SELL_FEE, TAX, SLIP = 0.00015, 0.00015, 0.002, 0.005
 
-def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="fixed", rng=None, stop_prob=1.0, exit_mask=None, up=None, rule_up=None, prio=None, nslot=None, log=None, skip=None, hold_exit=None):
+ETF_FEE = 0.00015   # 지수 ETF 대용 매매 수수료 (거래세 없음) — 2026-11-09 regime_exposure.py
+
+def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="fixed", rng=None, stop_prob=1.0, exit_mask=None, up=None, rule_up=None, prio=None, nslot=None, log=None, skip=None, hold_exit=None,
+             gate_in=None, cap=None, liq=None, etf=None):
     """rule(k, entry_avg, peak_close, atr0) -> 손절선 (None 이면 손절 없음). T = 시간 청산 거래일 (None 이면 없음).
     slot_mode: fixed = 1,000만 고정(라이브) / prop = 전일 자산÷10 (투자비중 왜곡 제거용)
     rng: numpy Generator — 주면 같은 날 후보 순서를 무작위로 섞는다(경로 의존성 측정). stop_prob<1 = WRST(손절선 닿은 날 그 확률로만 청산, 아니면 다음 날 다시 판정)
     up: 날짜별 bool Series (True=상승국면) · rule_up: 판정일(i-1)이 상승국면이면 rule 대신 쓸 손절 규칙 (2026-11-05 stop_regime.py)
     skip: 날짜별 bool Series — 판정일(i-1)이 True 면 그날 손절 판정을 건너뛴다 (손절 유예, 2026-11-07 swing_shock_gates.py)
-    hold_exit: f(j, first_i, i_prev) -> bool — 보유 중 사건 청산 (종가 판정 → 익일 시가×99.5%, reason "hold_exit"). 기본 None = 기존 동작 (2026-11-08 swing_surprise_test.py)"""
+    hold_exit: f(j, first_i, i_prev) -> bool — 보유 중 사건 청산 (종가 판정 → 익일 시가×99.5%, reason "hold_exit"). 기본 None = 기존 동작 (2026-11-08 swing_surprise_test.py)
+    ── 2026-11-09 regime_exposure.py (시장 층 노출 통제) — 전부 판정일(i-1) 값으로 오늘(i) 시가에 집행, 기본 None = 기존 동작
+    gate_in: 날짜별 bool — False 면 그날 신규 매수 안 함
+    cap: 날짜별 int — 그날 슬롯 상한 (기본 nslot). 슬롯 크기는 그대로 (fixed 1,000만 / prop 자산÷nslot)
+    liq: 날짜별 bool — True 면 보유 전량 시가×99.5% 매도 (reason "liq")
+    etf: dict(open=Series, close=Series, on=bool Series) — on 이 켜지는 판정일 다음 날 시가에 남는 현금 전부로 지수 매수,
+         on 이 꺼진 판정일 다음 날 시가에 전량 매도(대금 T+1). 종목 매수 현금이 모자라면 그만큼 지수를 팔아 바로 쓴다 [가정].
+         수수료 ETF_FEE, 거래세·슬리피지 없음. eq 에 'etf' 열(지수 평가액)이 붙는다"""
+    gv = gate_in.reindex(p.dates).fillna(True).to_numpy(bool) if gate_in is not None else None
+    cv = cap.reindex(p.dates).to_numpy(float) if cap is not None else None
+    lv = liq.reindex(p.dates).fillna(False).to_numpy(bool) if liq is not None else None
+    if etf is not None:
+        eo = etf["open"].reindex(p.dates).to_numpy(float); ecl = etf["close"].reindex(p.dates).to_numpy(float)
+        eon = etf["on"].reindex(p.dates).fillna(False).to_numpy(bool)
+    units = 0.0
     skv = skip.reindex(p.dates).fillna(False).to_numpy() if skip is not None else None
     upv = up.reindex(p.dates).fillna(False).to_numpy() if up is not None else None
     dates = p.dates; mask = (dates >= pd.Timestamp(start)) & (dates <= pd.Timestamp(end or sr.END))
@@ -40,7 +57,7 @@ def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="f
     if prio is not None:   # 우선순위 점수(클수록 먼저) — 기본은 눌림 깊이 (2026-11-05 entry_priority.py)
         depth = prio.reindex(index=p.dates, columns=p.tickers).to_numpy(float)
     NS = nslot or NSLOT
-    tick = list(p.tickers); cash = CAP; pending = 0.0
+    tick = list(p.tickers); t2j = {t: j for j, t in enumerate(tick)}; cash = CAP; pending = 0.0
     pos = {}   # tk -> dict(slots, shares, cost, entry_i(최근), first_i, peak, atr0)
     last_sell = {}; trades = []; eq = []; equity_prev = CAP
     for i in idxs:
@@ -48,26 +65,30 @@ def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="f
         slot = SLOT if slot_mode == "fixed" else equity_prev / NS
         # 1) 청산 판정: 전일(i-1) 종가 기준 → 오늘 시가 체결
         for tk in list(pos):
-            j = tick.index(tk); q = pos[tk]
+            j = t2j[tk]; q = pos[tk]
             if i - 1 < q["entry_i"]: continue
             c_prev = cl[i - 1, j]
             if not np.isfinite(c_prev) or not np.isfinite(op[i, j]) or op[i, j] <= 0: continue
             k = i - 1 - q["entry_i"]; avg = q["cost"] / q["shares"]
-            reason = None
+            reason = "liq" if (lv is not None and lv[i - 1]) else None
             rr = rule_up if (upv is not None and upv[i - 1]) else rule
-            if rr is not None and not (skv is not None and skv[i - 1]):
+            if reason is None and rr is not None and not (skv is not None and skv[i - 1]):
                 line = rr(k, avg, q["peak"], q["atr0"])
                 if c_prev <= line and (stop_prob >= 1.0 or rng.random() < stop_prob): reason = "stop"
             if reason is None and xm is not None and xm[i - 1, j]: reason = "stop"
             if reason is None and hold_exit is not None and hold_exit(j, q["first_i"], i - 1): reason = "hold_exit"
             if reason is None and T is not None and (i - 1 - q["first_i"]) >= T: reason = "time"
             if reason:
-                fill = op[i, j] * ((1 - SLIP) if reason in ("stop", "hold_exit") else 1.0)
+                fill = op[i, j] * ((1 - SLIP) if reason in ("stop", "hold_exit", "liq") else 1.0)
                 net = fill * q["shares"] * (1 - SELL_FEE - TAX); pending += net
                 trades.append(dict(date=dates[i], ticker=tk, side="SELL", reason=reason, ret=net / q["cost"] - 1, hold=i - q["first_i"], pnl=net - q["cost"]))
                 last_sell[tk] = i; del pos[tk]
+        # 1b) 지수(ETF 대용) 청산: on 이 꺼진 판정일 다음 날 시가 전량 — 대금 T+1
+        if etf is not None and units > 0 and i > 0 and not eon[i - 1] and np.isfinite(eo[i]):
+            net = units * eo[i] * (1 - ETF_FEE); pending += net
+            trades.append(dict(date=dates[i], ticker="ETF", side="SELL", reason="etf_off", ret=np.nan, hold=np.nan, pnl=np.nan)); units = 0.0
         # 2) 매수: 전일 신호 → 오늘 시가
-        if i > 0:
+        if i > 0 and (gv is None or gv[i - 1]):
             fired = np.flatnonzero(sig[i - 1]); cands = []
             for j in fired:
                 tk = tick[j]
@@ -84,11 +105,18 @@ def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="f
             if rng is not None: rng.shuffle(cands)
             else: cands.sort(reverse=True)
             used = sum(q["slots"] for q in pos.values())
+            NSd = int(cv[i - 1]) if (cv is not None and np.isfinite(cv[i - 1])) else NS
             for _, j, tk in cands:
-                if used >= NS:
+                if used >= NSd:
                     if log is not None: log.append((dates[i - 1], tk, "슬롯꽉참"))
                     continue
-                price = op[i, j]; shares = int(min(slot, cash / (1 + BUY_FEE)) // price)
+                price = op[i, j]
+                need = slot * (1 + BUY_FEE)
+                if etf is not None and units > 0 and cash < need and np.isfinite(eo[i]):   # 지수를 팔아 종목 매수 자금을 바로 댄다 [가정]
+                    sell_u = min(units, (need - cash) / (eo[i] * (1 - ETF_FEE)))
+                    cash += sell_u * eo[i] * (1 - ETF_FEE); units -= sell_u
+                    if units < 1e-9: units = 0.0
+                shares = int(min(slot, cash / (1 + BUY_FEE)) // price)
                 if shares <= 0:
                     if log is not None: log.append((dates[i - 1], tk, "현금부족"))
                     continue
@@ -100,15 +128,21 @@ def run_port(p, s, atr, rule, T=None, start="2015-01-01", end=None, slot_mode="f
                 else:
                     pos[tk] = dict(slots=1, shares=shares, cost=cost, entry_i=i, first_i=i, peak=price, atr0=a0)
                 trades.append(dict(date=dates[i], ticker=tk, side="BUY", reason="", ret=np.nan, hold=np.nan, pnl=np.nan))
+        # 2b) 지수(ETF 대용) 매수: on 이 켜진 첫 판정일 다음 날 시가에, 종목 매수 뒤 남은 현금 전부
+        if etf is not None and i > 0 and eon[i - 1] and not (i > 1 and eon[i - 2]) and units == 0 and cash > 0 and np.isfinite(eo[i]):
+            units = cash * (1 - ETF_FEE) / eo[i]; cash = 0.0
+            trades.append(dict(date=dates[i], ticker="ETF", side="BUY", reason="etf_on", ret=np.nan, hold=np.nan, pnl=np.nan))
         # 3) peak(종가) 갱신 + 평가
         mv = 0.0
         for tk, q in pos.items():
-            j = tick.index(tk); c = cl[i, j]
+            j = t2j[tk]; c = cl[i, j]
             if np.isfinite(c): q["peak"] = max(q["peak"], c); mv += c * q["shares"]
             else: mv += q["cost"]
-        equity_prev = cash + pending + mv
-        eq.append((dates[i], equity_prev, mv, len(pos)))
-    eq = pd.DataFrame(eq, columns=["date", "equity", "mv", "n"]).set_index("date")
+        ev = units * ecl[i] if (etf is not None and units > 0) else 0.0
+        equity_prev = cash + pending + mv + ev
+        eq.append((dates[i], equity_prev, mv, len(pos), ev))
+    eq = pd.DataFrame(eq, columns=["date", "equity", "mv", "n", "etf"]).set_index("date")
+    if etf is None: eq = eq.drop(columns="etf")
     return eq, pd.DataFrame(trades)
 
 def metrics(eq, tr):
