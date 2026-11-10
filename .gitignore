@@ -112,3 +112,8 @@ korean_mkt_study/_cache_2015/
 korean_mkt_study/out/crash/
 # 2026-11-07 KRX 업종지수 수집 중간 캐시 — 생성은 korean_mkt_study/fetch_sector_indices.py
 korean_mkt_study/_cache_sector/
+
+# 2026-11-05 스윙 백테스트 데이터 11-04 연장본(111MB) — 생성은 korean_mkt_study/extend_data_1104.py (정본 data/ 는 그대로)
+korean_mkt_study/data_1104/
+# 2026-11-05 국면 감지 비교 지수(14MB) — 생성은 korean_mkt_study/fetch_indices.py (+ 2000~2014 코스피200 pykrx)
+korean_mkt_study/data_idx/
