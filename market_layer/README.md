@@ -65,8 +65,60 @@ drives = attach_regime(drives, date_col="D1", lag=1)   # 그날 장중 판단용
   (코스피 200·중형 TMI·KRX 확정 브레드스가 모두 있는 마지막 날까지 — 19:10 잠정은 안 들어간다).
 - ⚠ **유효 구간 밖은 결측이다** — 판정기는 시작값을 '보유·상승'으로 두므로 재료가 쌓이기 전이 그렇게 보인다. 표는 그 구간을 지운다.
   브레드스 = 값이 처음 ±0.05 를 넘은 날부터, C2 = 두 200일선이 생긴 뒤 괴리형이 처음 성립한 날부터, ⑦·regime = 둘 다.
-- ⚠ 2026-11-10 에어 실측: 브레드스 재료가 LLV 에 **2023-06-01~** 만 있어 브레드스·⑦·regime 은 **2023-11-24~** 만 유효
-  (브레드스 18구간, C2 2016-04-22~ 87구간). 2015년까지 늘리려면 LLV `backfill_market_breadth.py --start 20150102 --end 20230531 --fetch-missing`
-  (미니, 평일 08~18시) 뒤 표를 다시 만든다. 연구 쪽 전 종목 비율(prices.parquet)로 앞을 메우지 말 것 — 겹치는 834일에서 LLV 와 상태가 **91.2%** 만 일치한다.
+- 유효 시작 (2026-11-10 LLV 브레드스 2015 백필 뒤): **브레드스 2015-06-29~** (49구간) · **C2·⑦·regime 2016-04-22~** (C2 87구간, regime 129구간).
+  연구 쪽 전 종목 비율(prices.parquet)로 메우지 말 것 — 겹치는 834일에서 LLV 와 상태가 **91.2%** 만 일치한다 (정의가 다르다).
 - ⚠ 구간 길이 비교엔 `_cens == ""` 인 구간만 — 첫 구간은 시작을, 마지막 구간은 끝을 모른다.
 - ⚠ 라벨은 그날 **종가까지** 본 값이다. 붙인 날 장중에 쓸 규칙이면 `lag=1`.
+
+## 다른 프로젝트에서 쓰기 — 사용 방법 (2026-11-10 케인, 정본)
+
+시장 국면을 쓰는 분석·규칙은 **새로 계산하지 말고 아래 둘 중 하나를 읽는다.** 판정은 MagicFormula `market_layer` 한 곳에서만 한다.
+
+### 어디서 읽나
+
+| 용도 | 읽는 곳 | 갱신 | 예 |
+|---|---|---|---|
+| **지난 기간 분석·연구** (이벤트·신호 표에 날짜로 붙이기) | `output/market_layer/regime_history.parquet` | 미니 08:40 확정 판정 끝에 통째로 재생성 · 에어는 02:00 `pull_from_mini` | `korean_mkt_study/drive_regime.py` · `bounce_regime.py` · `wyckoff_regime.py` |
+| **매일 운영** (오늘·어제 판정으로 표기·게이트) | `output/market_layer/YYYYMMDD.json` — `confirmed` 우선, 없으면 `provisional` | 19:10 잠정 · 다음 날 08:40 확정 (같은 파일) | SP `app/adapters/market_layer.py` (유스윙포트 게이트) · `bounce_rule/regime.py` (반등 룰 메일 표기) |
+
+### 코드
+
+```python
+# 연구 — MagicFormula 를 import 할 수 있을 때
+import sys; sys.path.insert(0, "<StoLab>/MagicFormula")
+from market_layer import attach_regime, load_history
+ev = attach_regime(ev, date_col="date")                 # 그날 종가까지 본 라벨 → mkt_breadth · mkt_c2 · mkt_regime · mkt_p7 · *_day
+ev = attach_regime(ev, date_col="date", lag=1)          # 그날 장중 판단 규칙 — 전날 라벨 (미래 정보 없음)
+ev = attach_regime(ev, "date", cols=["breadth"], prefix="")   # 필요한 열만, 접두사 없이
+
+# 연구 — import 가 어려운 저장소: parquet 을 직접 읽어 날짜로 조인
+h = pd.read_parquet("<StoLab>/MagicFormula/output/market_layer/regime_history.parquet"); h.index = pd.to_datetime(h.index)
+ev = ev.join(h[["breadth", "c2"]], on="date")
+
+# 운영 — 그날 판정 (bounce_rule/regime.py 의 market_regime 이 그대로 쓰는 순서: 확정 → 잠정 → 이력 표 → None)
+from bounce_rule.regime import market_regime
+reg = market_regime("2026-11-10")   # {'breadth': '하락', 'c2': '보유', 'stage': '잠정', 'breadth_value': -0.06} 또는 None
+```
+
+### 원칙 — 2026-11-10 세 점검(드라이브 · 반등 룰 · 와이코프)에서 확인한 것
+
+1. **국면 축은 브레드스를 쓴다.** 세 점검 모두에서 브레드스만 학습 두 기간·보류 구간에 걸쳐 같은 방향이었다.
+   C2·갭쇼크 창은 기간마다 방향이 뒤집혔다 (근거: `korean_mkt_study/DRIVE_STUDY.md` §8.7·§9 · `WYCKOFF_REGIME.md`).
+   C2·⑦ 는 '노출(보유/현금) 판정'용이다 — 종목·유형 규칙의 통제 변수로 쓰려면 따로 검정한다.
+2. **라벨 날짜 = 판단 시점.** 드라이브는 D1, 신호는 신호일 종가 (그날 저녁 판단 → 다음 날 시가 진입이면 lag 0 이 미래 정보 없음).
+   그날 장중에 판단하는 규칙이면 `lag=1`. 사후 정보(끝난 날·구간 다수결)로 붙인 라벨은 서술용으로만.
+3. **수익은 코스피 200 초과로 비교한다.** 국면은 시장 방향을 같이 바꾼다 — 반등 룰에서 원수익 차(+6.1 vs +0.7%)의 대부분이 시장 몫이었다 (`DRIVE_STUDY.md` §9.4).
+4. **건수 비교는 하지 않는다.** 브레드스가 곧 상승·하락 종목 수라 '하락 국면에 하락 드라이브가 많다' 는 순환이다. 성질·성적만 비교한다.
+5. **학습 = 2026-05 까지, 2026-06~ = 보류(검증용).** 보류 구간은 판정 기준을 먼저 문서에 적고 커밋한 뒤 **한 번만** 연다. 판정은
+   재현(같은 방향) · 강한 재현(95% 구간이 0 을 안 품음) · 불통과(반대) · 판정 불가(한쪽 20건 미만).
+6. **같은 날 묶인 표본은 독립이 아니다.** 신뢰구간은 날짜 단위(드라이브 = D1, 사후 = 끝 날, 신호 = 신호일) 부트스트랩.
+7. **결측은 빼고 쓴다.** 유효 구간 밖은 NA(판정기 시작값을 지운 것) — 상승·보유로 채우지 말 것. 구간 길이·전환 분석은 `_cens == ""` 구간만.
+8. **규칙에 반영할 땐 '표기' 부터.** 반등 룰은 신호 조건을 그대로 두고 메일·JSON 에 국면만 적었다 (케인 11-10 (가)) — 표본이 쌓이면 다시 판정한다.
+
+### 새로 쓰는 쪽 체크리스트
+
+- [ ] 연구면 `attach_regime`(또는 parquet 조인), 운영이면 그날 JSON — 직접 계산하지 않았나
+- [ ] 라벨 날짜가 판단 시점인가 (`lag` 확인)
+- [ ] 초과수익(코스피 200 차감)으로 비교했나 · 날짜 단위 신뢰구간인가
+- [ ] 학습/보류를 나눴나 · 보류 기준을 먼저 커밋했나
+- [ ] 결과 문서에 이 절을 링크했나 (StoLab-meta `CLAUDE.md` '공용 라벨' 절이 여기를 가리킨다)
