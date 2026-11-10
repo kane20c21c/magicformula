@@ -31,8 +31,10 @@ True = 보유, False = 현금. 종목 고르기(스윙·데이 포트)와는 독
 
 - ⚠ **판정일이 아닌 날의 재료 결측은 사고다.** 200일선 창에 하루라도 빠지면 그 뒤 199일 이평이 비어 상태가 조용히 얼어붙는다 —
   `load_inputs` 가 찾아 `InputGapError` 로 멈춘다(exit 1). TMI 결측은 LLV `backfill_krx_tmi_mid.py --resume` 로 메운다.
-- ⚠ 한국투자 '상승'에 '상한'이 들어 있는지는 LLV `market_breadth.KIS_ADV_INCLUDES_LIMIT` 가 정본 — 미확정이면 판정일 브레드스를 쓰지 않고 전날 상태를 유지한다.
-- ⚠ 애프터마켓(16:00~20:00)이 등락 수·지수를 바꾸는지 2026-11-10 기준 확인 중 — `KIS_PHASES` 기본 순서는 그 결과로 고친다.
+- 한국투자 '상승'에 '상한'이 들어 있는지는 LLV `market_breadth.KIS_ADV_INCLUDES_LIMIT` 가 정본 — **들어 있다**(`True`, 2026-11-10 실측).
+  `None` 으로 되돌리면 판정일 브레드스를 쓰지 않고 전날 상태를 유지한다.
+- 애프터마켓(16:00~20:00)은 등락 수·지수를 **바꾸지 않았다** (2026-11-10 하루치 — 15:35·16:41·19:06 같은 값).
+  `KIS_PHASES` 는 reg(15:33) → sig(19:00) → fact(20:30) 그대로 둔다.
 - 연구 재현: 연구 입력(필터 브레드스·pykrx TMI)으로 2015-01-02~2026-11-04 2,905일 ⑦·⑤·브레드스·C2 **하루도 다르지 않음**
   (`tests/test_market_layer.py`, 고정본 `tests/fixtures/market_layer_research.csv` — 생성 `korean_mkt_study/make_market_layer_fixture.py`).
   LLV 운영 재료로는 보류 구간 106일 100% 일치, 2025-12~2026-04 는 짧은 이력·정의 차이로 62일 갈림(운영 = 현금 쪽).
