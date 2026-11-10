@@ -67,5 +67,7 @@ def test_classification_overrides(tmp_path):
 
 def test_repo_overrides_file_is_valid():
     d = json.load(open(SRC.parent / "sector_overrides.json", encoding="utf-8"))["overrides"]
-    assert len(d) == 32 and d["068270"]["sector"] == "생활.제약" and d["207940"]["sector"] == "생활.제약"
+    assert len(d) == 98 and d["068270"]["sector"] == "생활.제약"   # 32 (11-02 U7) + 66 (11-14 유니버스 조정 신규)
+    assert d["140410"]["sector"] == "바이오.제약" and d["103140"]["sector"] == "방산"   # 케인 2026-11-10 확정값
+    assert d["207940"]["sector"] == "생활.제약"
     assert all("." in v["sector"] or v["sector"] in {"엔터", "건설", "조선", "로봇", "방산", "지주", "IT서비스", "기계장비", "자동차", "자동차소부장", "기타"} for v in d.values())
