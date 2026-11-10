@@ -2,7 +2,9 @@
 """fetch_indices.py — 국면 감지 비교 지수 수집 (케인 2026-11-05 승인 목록).
 
 원천  pykrx (KRX 정보데이터시스템, LLV .env 의 KRX_ID/KRX_PW 로그인) — 지수 하나를 기간 한 번 호출
-      KRX Open API(idx/krx_dd_trd)는 이 키로 401 → KRX 계열은 pykrx 만 가능
+      KRX Open API(idx/krx_dd_trd)는 수집 당시(11-05) 이 키로 401 → KRX 계열은 pykrx 로 받았다
+      ※ 2026-11-10 케인 신청 후 사용 가능 — KRX 중형 TMI 는 LLV tickers/KRX_TMI_MID.parquet 가 운영 정본
+        (LLV krx_fetcher.fetch_krx_tmi_mid · probe_krx_dd_trd.py 에서 pykrx 값과 일치 확인)
       코스피200 동일가중 = KODEX 200동일가중 ETF(252650) 가격 그대로 (케인 16:56)
 ⚠    KRX 300(2018-02 발표)·KRX TMI 규모별(2025-01 발표)은 발표 전 구간이 소급 산출값 — 종가만 있고 시·고·저 0
 저장  data_idx/krx_indices.parquet (long: date, name, code, open, high, low, close, volume, value, mktcap)
