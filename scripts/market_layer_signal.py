@@ -121,6 +121,15 @@ def main(argv: list[str]) -> int:
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8"); tmp.replace(path)
     print(f"저장: {path}" + ("" if out["provisional_matches_confirmed"] is None
                               else f" · 잠정=확정 {out['provisional_matches_confirmed']}"))
+    if stage == "confirmed":
+        # 확정 판정 뒤 국면 라벨 표(regime_history.parquet)도 같은 재료로 갱신한다 (2026-11-10 케인).
+        # 판정 파일은 이미 저장됐으므로 표 갱신 실패는 경고만 — 유스윙포트 게이트를 막지 않는다.
+        try:
+            from market_layer.history import update_history
+            m = update_history()
+            print(f"국면 라벨 표 갱신: {m['first_date']}~{m['as_of']} {m['rows']}일 · 최신 {m['latest']['regime']}")
+        except Exception as e:                                     # noqa: BLE001
+            print(f"⚠ 국면 라벨 표 갱신 실패 — {type(e).__name__}: {e} (scripts/market_layer_history.py 로 다시)")
     return 0
 
 

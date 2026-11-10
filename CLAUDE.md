@@ -185,6 +185,11 @@ stop3: 일 +0.208 · Sharpe 2.20 · MDD −12.7 · 최악일 −3.2(저가 근�
 실행 = SP 저녁 체인 12단계(잠정) · 08:40 `magicformula-market-layer-confirm`(확정). 소비자 = SP **유스윙포트**(원 스윙 + ⑦ 게이트, 케인 11-10) — 정본·함정은 `market_layer/README.md`.
 ⚠ 데이포트·화이트포트 통일장 버전은 **연구 과제** (실제 데이포트 규칙에 ⑦ 을 얹은 검정 없음 — 유데이포트 보류).
 
+**국면 라벨 표** `output/market_layer/regime_history.parquet` (2026-11-10 케인) — 판정기와 같은 함수로 전 구간을 다시 계산한 하루 한 줄 이력
+(브레드스 상승/하락 · C2 보유/퇴출 · 2×2 `regime` · ⑦/⑤ · 갭쇼크 · 구간 번호/경과일). **다른 분석은 이 표를 날짜로 붙여 쓴다** —
+`from market_layer import attach_regime` (드라이브는 D1 기준, 그날 장중 판단용이면 `lag=1`). 08:40 확정 판정이 끝에 갱신.
+⚠ 유효 구간 밖은 결측(시작값 '보유'를 지움) · 구간 길이는 `_cens == ""` 만. 정의·함정 = `market_layer/README.md` §국면 라벨 표.
+
 ## 스케줄 (평일, KST — 정본은 `StockPortfolio/SCHEDULED_TASKS.md`)
 
 | 시각 | 룰 | 내용 |
