@@ -21,9 +21,10 @@ def roll(g, col, w, fn="mean", minp=None):
     return g[col].transform(lambda s: getattr(s.rolling(w, min_periods=minp), fn)())
 
 
-def build(direction: int = +1) -> pd.DataFrame:
+def build(direction: int = +1, px: pd.DataFrame | None = None) -> pd.DataFrame:
+    """px 를 주면 그 가격으로 만든다 (drive_regime 보류 구간 검증 — LLV 원본 이어 붙인 가격). 기본 = prices.parquet."""
     t0 = time.time()
-    px = load_ohlcv(DATA / "prices.parquet")
+    px = load_ohlcv(DATA / "prices.parquet") if px is None else px.copy()
     px = add_daily_fields(px, direction)                       # r1, run, ov, valid, v20, next_r1, c10, ext2_10
     g = px.groupby("ticker", sort=False, observed=True)
     # ---- D0 시점 일별 피처 (그날 종가까지) ----

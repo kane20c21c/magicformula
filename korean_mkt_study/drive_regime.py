@@ -49,13 +49,49 @@ PERIODS = {"전체": ("2016-01-01", "2026-05-29"), "2016~2020": ("2016-01-01", "
            "2021~2026.05": ("2021-01-01", "2026-05-29")}
 
 
+SEAM = pd.Timestamp("2026-09-11")          # prices.parquet 을 여기까지 쓰고 이 날 행부터 LLV KRX 원본으로 (breadth_study PX_END 와 같음)
+LLV_RAW = HERE.parents[1] / "LongLiveVault" / "data" / "raw"
+
+
+def ext_prices() -> pd.DataFrame:
+    """prices.parquet(~09-10) + LLV KRX 원본(09-11~, 정규장 종가·원주가) — 보류 구간 검증용. 이음매 대조를 출력한다."""
+    import glob
+    from drive_types import load_ohlcv
+    from crash_study import DATA
+    px = load_ohlcv(DATA / "prices.parquet"); px["ticker"] = px.ticker.astype(str)
+    fs = sorted(f for m in ("kospi", "kosdaq") for f in glob.glob(str(LLV_RAW / f"krx_{m}_*.parquet"))
+                if f[-16:-8] >= "20260801")
+    r = pd.concat([pd.read_parquet(f, columns=["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]) for f in fs])
+    r.columns = ["date", "ticker", "open", "high", "low", "close", "volume"]
+    r["date"] = pd.to_datetime(r.date); r["ticker"] = r.ticker.astype(str); r = r[r.close > 0]
+    # 이음매 대조 — 겹치는 08월~09-10 에서 prices 와 원본이 같은지 (자본변동 종목 빼면 같아야 한다)
+    j = px[(px.date >= "2026-08-01") & (px.date < SEAM)].merge(r, on=["ticker", "date"], suffixes=("", "_r"))
+    print(f"이음매 대조 (08-01~09-10, {len(j):,}행): 종가 일치 {(j.close.round() == j.close_r).mean():.1%} · "
+          f"거래량 일치 {(j.volume == j.volume_r).mean():.1%}")
+    days = sorted(r.date.unique()); print(f"원본 {pd.Timestamp(days[0]):%Y-%m-%d}~{pd.Timestamp(days[-1]):%Y-%m-%d} {len(days)}일")
+    tail = r[r.date >= SEAM]
+    out = pd.concat([px[px.date < SEAM][["ticker", "date", "open", "high", "low", "close", "volume"]], tail], ignore_index=True)
+    out["ticker"] = out.ticker.astype("category")
+    for c in ("open", "high", "low", "close"):
+        out[c] = out[c].astype("float32")
+    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+
+
 def load_drives(hist: pd.DataFrame, rebuild: bool = False, holdout: bool = False) -> dict[str, pd.DataFrame]:
-    up = pd.read_parquet(OUT / "drive_len_up.parquet")
-    p = OUT / "drive_len_down.parquet"
-    if rebuild or not p.exists():
-        import drive_length
-        drive_length.build(-1).to_parquet(p)
-    dn = pd.read_parquet(p)
+    if holdout:
+        pu, pd_ = OUT / "drive_len_up_ext.parquet", OUT / "drive_len_down_ext.parquet"
+        if rebuild or not (pu.exists() and pd_.exists()):
+            import drive_length
+            px = ext_prices()
+            drive_length.build(+1, px).to_parquet(pu); drive_length.build(-1, px).to_parquet(pd_)
+        up, dn = pd.read_parquet(pu), pd.read_parquet(pd_)
+    else:
+        up = pd.read_parquet(OUT / "drive_len_up.parquet")
+        p = OUT / "drive_len_down.parquet"
+        if rebuild or not p.exists():
+            import drive_length
+            drive_length.build(-1).to_parquet(p)
+        dn = pd.read_parquet(p)
     days = hist.index
     out = {}
     for name, d in (("상승형", up), ("하락형", dn)):
@@ -67,7 +103,8 @@ def load_drives(hist: pd.DataFrame, rebuild: bool = False, holdout: bool = False
         post_end[ok] = days[pos[ok] + POST]
         d["post_end"] = post_end
         if holdout:
-            d = d[(d.date >= HOLD_START) & (d.post_end < PX_CUT)]
+            last = d.date_end.max()                       # 가격 데이터 끝 — 사후 창이 그 안에 들어와야 한다
+            d = d[(d.date >= HOLD_START) & d.post_end.notna() & (d.post_end <= last)]
         else:
             d = d[d.post_end.notna() & (d.post_end <= LEARN_END)]
         out[name] = d
@@ -191,7 +228,7 @@ if __name__ == "__main__":
     hist = load_history()
     drives = load_drives(hist, "--rebuild" in sys.argv, holdout="--holdout" in sys.argv)
     if "--holdout" in sys.argv:
-        print("⚠ 보류 구간(2026-06~) — 검증 때만 쓴다"); PERIODS.clear(); PERIODS["보류"] = ("2026-06-01", "2026-09-13")
+        print("⚠ 보류 구간(2026-06~) — 검증 때만 쓴다"); PERIODS.clear(); PERIODS["보류"] = ("2026-06-01", "2026-12-31")
     for k, d in drives.items():
         print(f"{k}: {len(d):,} 드라이브 · D1 {d.date.min():%Y-%m-%d}~{d.date.max():%Y-%m-%d} · 사후 창 끝 ≤ {d.post_end.max():%Y-%m-%d}")
     S, O, T = run(drives, hist)
