@@ -88,8 +88,20 @@ def test_universe_unknown_raises():
 # ---------------------------------------------------------------------------
 
 def test_known_sector():
-    assert get_sector("000660") == "반도체"
-    assert get_sector("005930") == "반도체"
+    """섹터는 LLV 정본(core_tickers · extend_tickers) 그대로 — 고정 문자열로 박지 않는다.
+
+    2026-11-11: 09-07 반도체 세분화('반도체' → '반도체.완품' 등) 뒤 고정값 테스트가 두 달간 깨져 있었다.
+    섹터 이름은 LLV 가 바꾸는 값이라, 여기서는 '정본을 그대로 옮기는가' 만 본다. 코어가 확장보다 우선.
+    """
+    from stolab_data.core_tickers import TICKER_LIST
+    from stolab_data.extend_tickers import EXTEND_LIST
+    core = {t: s for t, _n, s in TICKER_LIST}
+    for t, s in core.items():
+        assert get_sector(t) == s, t
+    for t, _n, s in EXTEND_LIST:
+        if t not in core:
+            assert get_sector(t) == s, t
+    assert get_sector("000660").startswith("반도체")       # 대표 종목 표본 — 세부 분류가 바뀌어도 반도체 계열
     assert get_sector("079550") == "방산"
 
 
@@ -105,7 +117,14 @@ def test_sector_order_complete():
 
 
 def test_ticker_names_fallback_covers_all_core():
-    """모든 vault CORE_TICKERS 가 TICKER_NAMES_FALLBACK 에 있어야 함."""
+    """모든 vault CORE_TICKERS 가 TICKER_NAMES_FALLBACK 에 있어야 함.
+
+    손 목록에 없는 코어 종목은 LLV KRX 종목 명부로 채운다 (_fill_core_names, 2026-11-11) —
+    명부(원본 data/raw)가 없는 환경이면 검사할 근거가 없으므로 건너뛴다.
+    """
+    from stolab_data.data_service import get_name_map
+    if not get_name_map():
+        pytest.skip("LLV KRX 종목 명부가 비어 있음 (data/raw 없음)")
     missing = CORE_TICKERS - set(TICKER_NAMES_FALLBACK.keys())
     assert missing == set(), f"fallback 누락: {missing}"
 

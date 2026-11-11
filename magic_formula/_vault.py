@@ -174,6 +174,35 @@ for _et, _enm, _es in _VAULT_EXTEND_LIST:
     if _enm and _et not in TICKER_NAMES_FALLBACK:
         TICKER_NAMES_FALLBACK[_et] = _enm
 
+
+def _fill_core_names() -> None:
+    """위 손 목록에 없는 코어 종목명을 채운다 (2026-11-11 케인).
+
+    LLV `core_tickers.TICKER_LIST` 는 이름 칸이 대부분 비어 있다 — 2026-09-07 재분류로
+    확장 → 코어로 옮겨진 종목들은 확장 보강에서도 빠져 두 달간 대체 이름이 없었다(24종목).
+    1순위 LLV 목록의 이름, 2순위 LLV KRX 종목 명부 `data_service.get_name_map()`
+    (매일 08:01 원본 기반 · 시세 파일 Name 과 독립이라 Name 이 통째로 비는 사고에도 쓸 수 있다).
+    명부가 비거나 LLV 를 못 읽으면 지금처럼 티커로 떨어진다 (fail-safe). 실측 비용 약 0.04초.
+    """
+    for t, n, _s in _VAULT_TICKER_LIST:
+        if n and t not in TICKER_NAMES_FALLBACK:
+            TICKER_NAMES_FALLBACK[t] = n
+    missing = [t for t in _VAULT_CORE if t not in TICKER_NAMES_FALLBACK]
+    if not missing:
+        return
+    try:
+        from stolab_data.data_service import get_name_map  # type: ignore
+        names = get_name_map() or {}
+    except Exception:
+        return
+    for t in missing:
+        if names.get(t):
+            TICKER_NAMES_FALLBACK[t] = names[t]
+
+
+if VAULT_AVAILABLE:
+    _fill_core_names()
+
 # ---------------------------------------------------------------------------
 # 공개 API
 # ---------------------------------------------------------------------------
