@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 build_universe.py — 스윙 유니버스 월 파일 생성 (STRATEGY.md §2 · §8-1, 작업 계획 WP4 — 2026-10-29)
+
+⚠ 2026-11-14 (케인 — 명단 정본 = LLV): 이 결과의 이름은 **메가갤럭시**다. 규칙 코드는 LLV
+  `stolab_data/ticker_groups.build_megagalaxy` 가 정본이고 이 파일은 그것을 부르는 껍데기다. 생성 파일도
+  LLV data/groups/megagalaxy_{적용일}.json 으로 간다 (LLV daily_update 08:01 이 점검일 다음 날 자동 생성 —
+  손으로 돌릴 일은 복구·검산뿐). 이 폴더의 universe_*.json 은 2026-11 까지의 이력으로만 남는다.
 ====================================================================================================
 지금까지 universe_YYYY-MM_*.json 은 손으로 만들었다(9월분 = 2026-09-12, 클로이). 10월분은 만들어지지 않아
 10월 내내 9월 파일(8/31 기준)로 폴백했다 (2026-10-29 확인). 같은 절차를 스크립트로 옮긴다.
@@ -44,36 +49,28 @@ STRATEGY_ID = "kr_pullback_largecap_foreign"
 MIN_COUNT = 30          # 2026-10-31 케인 U6 확정 — 최소 30종목 유지
 
 
+def _tg():
+    import sys
+    if str(STOLAB / "LongLiveVault") not in sys.path:
+        sys.path.insert(0, str(STOLAB / "LongLiveVault"))
+    from stolab_data import ticker_groups
+    return ticker_groups
+
+
 def _is_trading_day(d: date) -> bool:
-    """LLV 거래일 캘린더(가능할 때) — 없으면 주말만 제외."""
     try:
-        import sys
-        if str(STOLAB / "LongLiveVault") not in sys.path:
-            sys.path.insert(0, str(STOLAB / "LongLiveVault"))
-        from stolab_data.trading_calendar import is_trading_day
-        return bool(is_trading_day(d))
+        return bool(_tg()._is_td(d))
     except Exception:
         return d.weekday() < 5
 
 
 def next_trading_day(d: date, is_td=None) -> date:
-    is_td = is_td or _is_trading_day
-    x = d + timedelta(days=1)
-    while not is_td(x):
-        x += timedelta(days=1)
-    return x
+    return _tg().next_trading_day(d, is_td or _is_trading_day)
 
 
 def expiry_week_friday(year: int, month: int, is_td=None) -> date:
-    """그 달 옵션 만기(둘째 목요일)가 든 주의 금요일 — 휴장이면 그 주의 마지막 거래일."""
-    is_td = is_td or _is_trading_day
-    first = date(year, month, 1)
-    thu = first + timedelta(days=(3 - first.weekday()) % 7 + 7)
-    for k in (1, 0, -1, -2, -3):                     # 금 → 목 → 수 → 화 → 월
-        x = thu + timedelta(days=k)
-        if is_td(x):
-            return x
-    raise ValueError(f"{year}-{month:02d} 만기 주에 거래일 없음")
+    """그 달 옵션 만기(둘째 목요일)가 든 주의 금요일 — 휴장이면 그 주의 마지막 거래일 (LLV 정본)."""
+    return _tg().expiry_week_friday(year, month, is_td or _is_trading_day)
 
 
 def next_month(d: date) -> str:
@@ -83,58 +80,12 @@ def next_month(d: date) -> str:
 
 def build(base: date, max_stale_days: int = 7, llv: Path = LLV, meta_path: Path | None = None,
           min_count: int = MIN_COUNT, effective: date | None = None) -> dict:
-    p = pd.read_parquet(llv / "ohlcv" / "panel.parquet", columns=["Date", "Ticker", "Name", "MarketCap", "Foreign_Ratio"])
-    p["Date"] = pd.to_datetime(p.Date); p["Ticker"] = p.Ticker.astype(str).str.zfill(6)
-    p = p[p.Date <= pd.Timestamp(base)].dropna(subset=["MarketCap", "Foreign_Ratio"])
-    last = p.sort_values("Date").groupby("Ticker").last()
-    stale = last[last.Date < pd.Timestamp(base) - pd.Timedelta(days=max_stale_days)]
-    last = last.drop(stale.index)
-
-    meta = pd.read_parquet(meta_path or (HERE / "data_ext" / "meta.parquet")).reset_index()
-    meta["ticker"] = meta.ticker.astype(str).str.zfill(6); meta["date"] = pd.to_datetime(meta.date)
-    meta = meta[meta.date <= pd.Timestamp(base)].sort_values("date").groupby("ticker").last()
-    flag = meta[["is_pref", "is_spac", "is_managed"]].astype("boolean").fillna(False).astype(bool).any(axis=1)
-    excl = set(flag[flag].index) | ETF | {t for t in last.index if not t.endswith("0")}
-
-    cand = last[~last.index.isin(excl)]
-    sel = cand[(cand.MarketCap >= MKTCAP_MIN) & (cand.Foreign_Ratio >= FOREIGN_MIN)].sort_values("MarketCap", ascending=False)
-    n_rule = len(sel)
-    # 최소 개수 바닥 (U6, 2026-10-31) — 채움 후보는 **이 패널(LLV) 안**의 외국인 ≥ 30% 종목만, 시총 큰 순서
-    floor = cand[(cand.Foreign_Ratio >= FOREIGN_MIN) & ~cand.index.isin(sel.index)].sort_values("MarketCap", ascending=False)
-    fill = floor.head(max(0, min_count - n_rule))
-    sel = pd.concat([sel, fill])
-    shortfall = max(0, min_count - len(sel))
-
-    # 패널 밖 4조↑ 점검 (KRX raw)
-    outside, raw_date = [], None
-    raws = sorted((llv / "raw").glob("krx_kospi_*.parquet"))
-    raws = [f for f in raws if f.stem.split("_")[-1] <= base.strftime("%Y%m%d")]
-    if raws:
-        rd = raws[-1].stem.split("_")[-1]; raw_date = f"{rd[:4]}-{rd[4:6]}-{rd[6:]}"
-        k = pd.concat([pd.read_parquet(f) for f in (llv / "raw" / f"krx_kospi_{rd}.parquet", llv / "raw" / f"krx_kosdaq_{rd}.parquet") if f.exists()])
-        k["Ticker"] = k.Ticker.astype(str).str.zfill(6)
-        big = k[(k.MarketCap >= MKTCAP_MIN) & k.Ticker.str.endswith("0") & ~k.Ticker.isin(set(last.index) | set(stale.index) | excl)]
-        outside = [{"ticker": r.Ticker, "name": r.Name, "mktcap_krw": int(r.MarketCap)} for r in big.sort_values("MarketCap", ascending=False).itertuples()]
-
-    filled = set(fill.index)
-    stocks = [{"ticker": t, "name": r.Name, "mktcap_krw": int(round(r.MarketCap)), "foreign_ratio_pct": round(float(r.Foreign_Ratio), 2),
-               "rule": "floor" if t in filled else "4jo_30pct"}
-              for t, r in sel.iterrows()]
+    """메가갤럭시 문서 — LLV ticker_groups.build_megagalaxy 위임 (llv 인자 = 테스트용 data 폴더)."""
+    panel = pd.read_parquet(llv / "ohlcv" / "panel.parquet", columns=["Date", "Ticker", "Name", "MarketCap", "Foreign_Ratio"])
     eff = effective or next_trading_day(base)
-    return {
-        "strategy_id": STRATEGY_ID, "base_date": base.isoformat(),
-        "effective_date": eff.isoformat(), "apply_month": eff.strftime("%Y-%m"),
-        "filters": {"mktcap_min_krw": MKTCAP_MIN, "foreign_ratio_min_pct": FOREIGN_MIN, "min_count": min_count,
-                    "floor_rule": "4조 & 30% 가 min_count 미만이면 LLV 패널 안 외국인 ≥ 30% 종목을 시총순으로 채움"},
-        "created_by": f"build_universe.py ({datetime.now():%Y-%m-%d %H:%M}) — 유니버스 2번째(4조/30%) + 최소 {min_count} (U6 2026-10-31)",
-        "count": len(stocks), "count_rule": n_rule, "floor_filled": sorted(filled), "floor_shortfall": shortfall,
-        "data_provenance": {
-            "derived_from": "LLV panel.parquet (MarketCap·Foreign_Ratio, 기준일 이전 마지막 유효값) + data_ext/meta 우선주·스팩·관리 플래그",
-            "panel_tickers": int(len(last) + len(stale)), "stale_excluded": sorted(stale.index.tolist()),
-            "krx_raw_date": raw_date, "outside_panel_4jo": outside,
-        },
-        "stocks": stocks,
-    }
+    return _tg().build_megagalaxy(base, max_stale_days=max_stale_days, min_count=min_count, effective=eff,
+                                  panel=panel, meta_path=meta_path or (HERE / "data_ext" / "meta.parquet"),
+                                  raw_dir=llv / "raw")
 
 
 def main(argv=None) -> int:
@@ -165,17 +116,17 @@ def main(argv=None) -> int:
         print(f"  ⚠ 기준일 근처 값 없음(제외): {pv['stale_excluded']}")
     if pv["outside_panel_4jo"]:
         print(f"  ⚠ 패널 밖 4조↑ (KRX {pv['krx_raw_date']}): " + ", ".join(f"{o['name']}({o['ticker']})" for o in pv["outside_panel_4jo"]))
-    prev_files = sorted(HERE.glob("data/universe_*.json"))
-    cmp = Path(a.check) if a.check else (prev_files[-1] if prev_files else None)
-    if cmp and cmp.exists():
-        old = json.loads(cmp.read_text(encoding="utf-8"))
+    tg = _tg()
+    prev = [x for x in tg.list_docs("megagalaxy") if x.get("effective_date") != res["effective_date"]]
+    old = json.loads(Path(a.check).read_text(encoding="utf-8")) if a.check else (prev[-1] if prev else None)
+    if old:
         ot = {s["ticker"]: s["name"] for s in old["stocks"]}; nt = {s["ticker"]: s["name"] for s in res["stocks"]}
         add = [f"{nt[t]}({t})" for t in nt if t not in ot]; rem = [f"{ot[t]}({t})" for t in ot if t not in nt]
-        print(f"  vs {cmp.name} ({old.get('count')}종목): 공통 {len(set(ot) & set(nt))} · 편입 {len(add)} {add} · 편출 {len(rem)} {rem}")
+        print(f"  vs {a.check or old.get('_file')} ({old.get('count')}종목): 공통 {len(set(ot) & set(nt))} · "
+              f"편입 {len(add)} {add} · 편출 {len(rem)} {rem}")
     if a.dry_run:
         return 0
-    out = HERE / "data" / f"universe_{res['effective_date']}_4jo_30pct_min{res['filters']['min_count']}.json"
-    out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    out = tg.save(res, overwrite=True)          # LLV data/groups/megagalaxy_{적용일}.json (명단 정본)
     print(f"  → {out}")
     return 0
 

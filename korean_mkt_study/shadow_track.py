@@ -148,6 +148,22 @@ def files(model: str) -> tuple[Path, Path]:
 
 # ── 유니버스 ────────────────────────────────────────────────────────────────
 def _universe_docs() -> list[dict]:
+    """메가갤럭시 문서 목록. 2026-11-14 (케인 — 명단 정본 = LLV): LLV data/groups/megagalaxy_*.json 1순위
+    (MF 이력 2026-07~ 이관분 포함). LLV 명단이 없을 때만 이 폴더의 universe_*.json (종전)."""
+    try:
+        import sys
+        if str(LLV) not in sys.path:
+            sys.path.insert(0, str(LLV))
+        from stolab_data import ticker_groups
+        docs = ticker_groups.list_docs("megagalaxy")
+        if docs:
+            return docs
+    except Exception as e:                                    # noqa: BLE001
+        print(f"  ⚠ LLV 메가갤럭시 명단 읽기 실패 — MF 파일로 폴백 ({e})")
+    return _mf_universe_docs()
+
+
+def _mf_universe_docs() -> list[dict]:
     docs = []
     for f in sorted(DATA.glob("universe_*.json")):
         try:
@@ -175,10 +191,10 @@ def universe_for(model: str, d: pd.Timestamp) -> dict:
     옛 파일은 apply_month 1일로 본다 — 종전(apply_month 매칭, 없으면 base_date ≤ d 최신)과 과거 날짜 결과가 같다.
     """
     spec = MODELS[model]["universe"]
-    docs = _universe_docs()
     if spec.startswith("fixed:"):
         name = spec.split(":", 1)[1]
-        return next(x for x in docs if x["_file"] == name)
+        return next(x for x in _mf_universe_docs() if x["_file"] == name)
+    docs = _universe_docs()
     day = d.strftime("%Y-%m-%d")
     ok = [x for x in docs if _effective_of(x) and _effective_of(x) <= day]
     if ok:
@@ -188,10 +204,11 @@ def universe_for(model: str, d: pd.Timestamp) -> dict:
 
 def all_universe_tickers(model: str) -> tuple[list[str], dict]:
     tks, names = set(), {}
-    docs = _universe_docs()
     spec = MODELS[model]["universe"]
     if spec.startswith("fixed:"):
-        docs = [x for x in docs if x["_file"] == spec.split(":", 1)[1]]
+        docs = [x for x in _mf_universe_docs() if x["_file"] == spec.split(":", 1)[1]]
+    else:
+        docs = _universe_docs()
     for doc in docs:
         for s in doc["stocks"]:
             tks.add(s["ticker"]); names[s["ticker"]] = s["name"]
