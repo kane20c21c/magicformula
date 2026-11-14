@@ -49,7 +49,7 @@ XS/G1/G5 100개 피처가 `groupby("Date").rank(pct=True)` — 그날 유니버�
   - 편출: 점검에서 **2회 연속** 50억 미달 / 재편입: 점검에서 50억 회복 즉시. 거래대금 결측이면 상태 유지.
   - 적용: 점검 **다음 거래일부터** 다음 점검일까지 (`membership_mask`, 마스크는 과거 전 구간에도 적용 — 횡단면 피처가 같은 유니버스로 계산되게).
   - `ACTIVE_FROM = 2026-11-16` — 신호일이 그 전이면 거르지 않는다(v1.1.2.5 동작 그대로).
-  - 관리 범위 190~240 · 대분류 섹터당 5종목 이상(MIN_SECTOR_N — 미만이면 그 섹터 G1 피처 결측) · 시총 상하한 없음.
+  - 관리 범위 260~310 (2026-11-14 유니버스 조정 — 종전 190~240, `day_universe.RANGE_MIN/MAX`) · 대분류 섹터당 5종목 이상(MIN_SECTOR_N — 미만이면 그 섹터 G1 피처 결측) · 시총 상하한 없음.
 - 적용 위치: `build_panel(today=...)` 3-1 단계(ETF·우선주 제외 다음). 섹터 게이지(`run_gauge.py`)는 `day_universe=False` — 게이지는 전 종목.
   화이트포트·그림자 v2 는 같은 features 를 쓰므로 함께 바뀐다(U7 워크포워드에서 화이트 차이 +0.01%p, t +0.29 확인).
 - **섹터 분류**: `src/classification.py` 가 LLV `ticker_classification.json` 위에 **`sector_overrides.json`(git 추적)** 을 덮어쓴다 —

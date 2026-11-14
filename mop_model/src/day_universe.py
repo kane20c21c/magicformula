@@ -5,7 +5,8 @@
   · 대상 = LLV 멤버(core+extend) 중 분류가 있고 ETF·우선주가 아닌 종목 — **편입은 케인 판단(ScoutingTheNext)**, 시총 상하한 없음
   · 유지 조건 = 20일 평균 거래대금 ≥ **50억** — 점검일에 **2회 연속 미달이면 편출**, 다시 50억 이상이면 재편입
   · 점검일 = 매월 옵션 만기(둘째 목요일)가 든 주의 금요일(휴장이면 그 주 마지막 거래일), **다음 거래일부터** 적용
-  · 관리 범위 190~240종목 · 대분류 섹터당 5종목 이상 (미달은 K7 회차 보고 경고 — 자동 편출 없음)
+  · 관리 범위 260~310종목 (2026-11-14 유니버스 조정으로 약 285종목 — 종전 190~240, 케인 2026-11-11) · 대분류 섹터당 5종목 이상
+    (미달은 K7 회차 보고 경고 — 자동 편출 없음)
 학습·신호 모두 같은 멤버십으로 거른다(횡단면 피처·y_rel 이 그 유니버스 안에서 계산되게). 과거 날짜도 같은 규칙.
 ACTIVE_FROM 이전 날짜에 신호를 만들면 필터를 걸지 않는다(배포 시점과 무관하게 11-16 부터 적용).
 
@@ -27,6 +28,7 @@ import config as cfg
 AMOUNT_MIN = 50e8          # 20일 평균 거래대금 하한 (원)
 AMOUNT_WIN, AMOUNT_MINP = 20, 15
 OUT_AFTER = 2              # 연속 미달 횟수 → 편출
+RANGE_MIN, RANGE_MAX = 260, 310   # 관리 범위 (경고용 — 자동 편출 없음). 2026-11-14 유니버스 조정, 종전 190~240
 ACTIVE_FROM = "2026-11-16"  # 11-13(11월 만기 주 금요일) 점검분부터 운영 적용
 RULE_ID = "day_universe_v1 (U7 2026-11-03: LLV멤버 ∩ 20일평균거래대금≥50억, 2회 연속 미달 편출, 만기 주 금요일 점검)"
 
@@ -111,7 +113,7 @@ def report(px: pd.DataFrame, cls: dict, asof=None, out_dir=None) -> dict:
     watch = sorted(t for t in members if pd.notna(A.loc[c, t]) and A.loc[c, t] < AMOUNT_MIN)
     sec = pd.Series([cls.get(t, {}).get("sector", "?").split(".")[0] for t in members]).value_counts()
     doc = {"rule": RULE_ID, "check_date": str(pd.Timestamp(c).date()), "effective_date": str(eff), "active_from": ACTIVE_FROM,
-           "count": len(members), "range_ok": 190 <= len(members) <= 240,
+           "count": len(members), "range_ok": RANGE_MIN <= len(members) <= RANGE_MAX,
            "removed": [{"ticker": t, "name": cls.get(t, {}).get("name", ""), "a20_eok": round(float(A.loc[c, t]) / 1e8, 1)} for t in removed],
            "reentered": [{"ticker": t, "name": cls.get(t, {}).get("name", "")} for t in reentered],
            "watch_below_once": [{"ticker": t, "name": cls.get(t, {}).get("name", ""), "a20_eok": round(float(A.loc[c, t]) / 1e8, 1)} for t in watch],
@@ -138,7 +140,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     cls = load_classification(); px = _load_px(cls)
     r = report(px, cls, asof=a.asof, out_dir=os.path.join(cfg.BASE_DIR, "output", "day_universe") if a.report else None)
-    print(f"[day_universe] 점검 {r['check_date']} → 적용 {r['effective_date']} · {r['count']}종목 (범위 190~240 {'OK' if r['range_ok'] else '⚠'})")
+    print(f"[day_universe] 점검 {r['check_date']} → 적용 {r['effective_date']} · {r['count']}종목 (범위 {RANGE_MIN}~{RANGE_MAX} {'OK' if r['range_ok'] else '⚠'})")
     print(f"  편출 {len(r['removed'])}: " + ", ".join(f"{x['name']}({x['a20_eok']}억)" for x in r["removed"]))
     print(f"  재편입 {len(r['reentered'])}: " + ", ".join(x["name"] for x in r["reentered"]))
     print(f"  주의(1회 미달) {len(r['watch_below_once'])}: " + ", ".join(f"{x['name']}({x['a20_eok']}억)" for x in r["watch_below_once"]))
