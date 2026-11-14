@@ -60,7 +60,7 @@ v1.2.3.5(10-05)부터는 직전 운영 **v1.2.3.4** 와 운영 복제 **v1.2.3.5
 **3번째 (2026-10-31 Kane 확정 — 11-13 종가 판정 → 11-16 적용)**
 - 조건은 그대로(시총 ≥ 4조 & 외인 ≥ 30%). 단 **최소 30종목** — 미달이면 **LLV 패널 안의** 외인 ≥ 30% 종목을 시총 큰 순서로 30까지 채운다(패널 밖으로는 채우지 않음 — 가격·지표가 없다).
 - 조정 시점 = **옵션 만기(둘째 목요일)가 든 주의 금요일 종가 → 다음 거래일부터** (월 중간 적용). 소급 없음(빠진 종목은 다음 월요일부터 신규 매수 없음).
-- 생성 (2026-11-14~ 명단 정본 = LLV, 이름 = 메가갤럭시): LLV daily_update 08:01 이 점검일 다음 날 `LongLiveVault/data/groups/megagalaxy_{적용일}.json` 을 자동 생성 (규칙 = LLV `ticker_groups.build_megagalaxy`). `build_universe.py --expiry YYYY-MM` 은 같은 파일을 덮어쓰는 껍데기(검산·복구). 이 폴더 `data/universe_*.json` 은 2026-11 까지 이력. 종전: `build_universe.py --expiry YYYY-MM` → `data/universe_{적용일}_4jo_30pct_min30.json`(effective_date). 소비자는 적용 시작일 ≤ 그날 인 파일 중 최신을 쓴다.
+- 생성 (2026-11-14~ 명단 정본 = LLV, 이름 = 메가갤럭시): `LongLiveVault/groups/megagalaxy_{적용일}.json` (git 추적, 규칙 = LLV `ticker_groups.build_megagalaxy`). 정기 조정 절차서 §1-1 D 외인 채움 → §1-2 에어 계산(`build_universe.py --expiry YYYY-MM` 또는 LLV `build_ticker_groups.py --check D --kind megagalaxy`) → §1-3 LLV 커밋 · 케인 push · 미니 pull. 이 폴더 `data/universe_*.json` 은 2026-11 까지 이력. 종전: `build_universe.py --expiry YYYY-MM` → `data/universe_{적용일}_4jo_30pct_min30.json`(effective_date). 소비자는 적용 시작일 ≤ 그날 인 파일 중 최신을 쓴다.
 - 근거: 볼트 '2026-10-30 U6 재테스트 — 스윙 유니버스 수량 격자 (data_2015)' — 30~35 는 현행과 같은 평지(띠 안), 37 부터 절벽(2016~21 붕괴), 외인 30% 가 25·35 보다 Sharpe 최고. 바닥 30 은 2016~26 의 24개월(폭락·약세장·회복기)에만 걸림.
 
 > 근거 (v1 원안): 사이즈(대형)와 외국인지분은 각각 독립적으로 다음 달 수익에 (+) 기여함이 조건부 이중정렬로 확인됨. 유니버스 조임이 진입규칙보다 위험조정 성과에 더 큰 지렛대였음.

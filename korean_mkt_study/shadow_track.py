@@ -148,7 +148,7 @@ def files(model: str) -> tuple[Path, Path]:
 
 # ── 유니버스 ────────────────────────────────────────────────────────────────
 def _universe_docs() -> list[dict]:
-    """메가갤럭시 문서 목록. 2026-11-14 (케인 — 명단 정본 = LLV): LLV data/groups/megagalaxy_*.json 1순위
+    """메가갤럭시 문서 목록. 2026-11-14 (케인 — 명단 정본 = LLV): LLV groups/megagalaxy_*.json 1순위
     (MF 이력 2026-07~ 이관분 포함). LLV 명단이 없을 때만 이 폴더의 universe_*.json (종전)."""
     try:
         import sys

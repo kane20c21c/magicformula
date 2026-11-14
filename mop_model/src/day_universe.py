@@ -3,7 +3,7 @@
 
 ⚠ 2026-11-14 (케인 — 명단 정본 = LLV): **규칙 코드·명단 파일은 LLV `stolab_data/ticker_groups.py` 가 정본이다.**
   이 파일은 그 함수를 다시 내보내는 껍데기 + MF 고유값(ACTIVE_FROM) 만 갖는다. 규칙을 고치려면 LLV 를 고친다.
-  명단 파일 = LLV data/groups/universe_{적용일}.json (LLV daily_update 08:01 이 점검일 다음 날 생성).
+  명단 파일 = LLV groups/universe_{적용일}.json (LLV daily_update 08:01 이 점검일 다음 날 생성).
   종전 output/day_universe/day_universe_*.json 은 더 만들지 않는다 (git 미추적·에어 전용이라 미니에 없었다).
 
 용어 (2026-11-14 케인): 이 결과를 대화·문서에서는 **유니버스**(관심 대상), 모집단 LLV 멤버(core+extend)는 **와이드버스** 라 부른다.
@@ -17,7 +17,7 @@
 ACTIVE_FROM 이전 날짜에 신호를 만들면 필터를 걸지 않는다(배포 시점과 무관하게 11-16 부터 적용).
 
 CLI (K7 회차 기록): python3 day_universe.py --report [--asof YYYY-MM-DD]
-  → LLV data/groups/universe_{적용일}.json (멤버·편출·재편입·주의·섹터 수)
+  → LLV groups/universe_{적용일}.json (멤버·편출·재편입·주의·섹터 수)
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def membership_mask(px: pd.DataFrame, today=None) -> pd.Series:
 
 
 def report(px: pd.DataFrame, cls: dict, asof=None, save: bool = False) -> dict:
-    """마지막 점검(asof 이전) 결과 — LLV build_universe. save=True 면 LLV data/groups 에 덮어쓴다."""
+    """마지막 점검(asof 이전) 결과 — LLV build_universe. save=True 면 LLV groups/ 에 덮어쓴다."""
     S, _ = status_table(px)
     if asof is not None:
         S = S[S.index <= pd.Timestamp(asof)]

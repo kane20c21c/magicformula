@@ -56,7 +56,7 @@ XS/G1/G5 100개 피처가 `groupby("Date").rank(pct=True)` — 그날 유니버�
   화이트포트·그림자 v2 는 같은 features 를 쓰므로 함께 바뀐다(U7 워크포워드에서 화이트 차이 +0.01%p, t +0.29 확인).
 - **섹터 분류**: `src/classification.py` 가 LLV `ticker_classification.json` 위에 **`sector_overrides.json`(git 추적)** 을 덮어쓴다 —
   LLV 분류가 없는 17종목 + 바이오 세분화 15종목(케인 지정 2026-11-01). LLV 분류 파일은 git 밖이라 여기 둔다.
-- K7 회차(만기 주 토요일): 명단 파일은 LLV daily_update 08:01 이 `LongLiveVault/data/groups/universe_{적용일}.json` 으로 자동 생성한다. `python3 src/day_universe.py --report` 는 회차 출력 + 같은 파일 덮어쓰기(검산·복구용). 종전 `output/day_universe/*.json` 은 더 만들지 않는다
+- K7 회차(만기 주 토요일): 명단 파일은 LLV daily_update 08:01 이 `LongLiveVault/groups/universe_{적용일}.json` 으로 자동 생성한다. `python3 src/day_universe.py --report` 는 회차 출력 + 같은 파일 덮어쓰기(검산·복구용). 종전 `output/day_universe/*.json` 은 더 만들지 않는다
   (종목 수 · 편출 · 재편입 · 1회 미달 주의 · 섹터 5 미만). `--asof YYYY-MM-DD` 로 과거 점검 재현.
 - 신호 JSON 에 `port_version`(config.DAY_PORT_VERSION) · `universe_rule` 기록.
 

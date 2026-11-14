@@ -4,8 +4,9 @@ build_universe.py — 스윙 유니버스 월 파일 생성 (STRATEGY.md §2 · 
 
 ⚠ 2026-11-14 (케인 — 명단 정본 = LLV): 이 결과의 이름은 **메가갤럭시**다. 규칙 코드는 LLV
   `stolab_data/ticker_groups.build_megagalaxy` 가 정본이고 이 파일은 그것을 부르는 껍데기다. 생성 파일도
-  LLV data/groups/megagalaxy_{적용일}.json 으로 간다 (LLV daily_update 08:01 이 점검일 다음 날 자동 생성 —
-  손으로 돌릴 일은 복구·검산뿐). 이 폴더의 universe_*.json 은 2026-11 까지의 이력으로만 남는다.
+  LLV groups/megagalaxy_{적용일}.json 으로 간다 (git 추적 — 정기 조정 절차서 §1-2 에어 계산 → §1-3 **LLV 커밋** →
+  케인 push · 미니 pull). D 외인을 토요일에 채운 뒤 돌려야 하므로 자동 생성하지 않는다.
+  이 폴더의 universe_*.json 은 2026-11 까지의 이력으로만 남는다.
 ====================================================================================================
 지금까지 universe_YYYY-MM_*.json 은 손으로 만들었다(9월분 = 2026-09-12, 클로이). 10월분은 만들어지지 않아
 10월 내내 9월 파일(8/31 기준)로 폴백했다 (2026-10-29 확인). 같은 절차를 스크립트로 옮긴다.
@@ -126,7 +127,7 @@ def main(argv=None) -> int:
               f"편입 {len(add)} {add} · 편출 {len(rem)} {rem}")
     if a.dry_run:
         return 0
-    out = tg.save(res, overwrite=True)          # LLV data/groups/megagalaxy_{적용일}.json (명단 정본)
+    out = tg.save(res, overwrite=True)          # LLV groups/megagalaxy_{적용일}.json (명단 정본)
     print(f"  → {out}")
     return 0
 
