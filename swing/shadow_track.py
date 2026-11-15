@@ -1,5 +1,10 @@
 """shadow_track.py — 스윙 포트 그림자 추적 (다중 모델, Kane 지시 2026-09-12).
 
+⚠ 2026-11-15 (케인 — 한 방향 원칙): 운영 패키지 MagicFormula/swing/ 으로 이전 (종전 korean_mkt_study/).
+  상태·로그 = swing/state/ (git 밖 — 미니 런타임). 첫 실행 때 옛 위치 korean_mkt_study/data/shadow_* 에서
+  자동 복사한다 (_migrate_legacy — 옛 파일은 지우지 않는다). 유니버스 = LLV groups/megagalaxy_*.json 만 읽는다
+  (연구 폴더 universe_*.json 폴백 제거 — LLV 명단을 못 읽으면 예외로 멈춘다).
+
 운영 모델이 바뀔 때마다 **직전 모델**을 그림자로 돌린다 (v1.2.3.4 전환 때 v1223·v1112, v1.2.3.5 전환 때 v1234, v1.2.3.6 전환 때 v1235 유지 + v1236 복제,
 v1.2.3.7 전환 때 v1236 유지 + v1237 복제, v1.2.3.8 전환 때 v1237 유지 + v1238 복제):
 
@@ -23,7 +28,7 @@ v1.2.3.7 전환 때 v1236 유지 + v1237 복제, v1.2.3.8 전환 때 v1237 유�
          총자산 차 ±1.4% 이내) 운영 − v1234 에는 엔진 차이가 섞인다. 규칙 효과는 **v1235 − v1234** 로 본다.
 
   v1223  직전 운영 v1.2.2.3 — 규칙 효과만 보기 위해 **사이징은 신모델과 같은 10×400만**
-         유니버스 4조/30% (월별 universe_*.json, 실계정과 동일 갱신)
+         유니버스 4조/30% (LLV 메가갤럭시 명단, 실계정과 동일 갱신)
          진입 W1: 40일 고점 −10% + MA200 위, onset 만
          청산 ③: 시간연동 4분기 × 변동배율(클립) — D+6 검사 **없음**
          분기: 2026-09-14 전환 시점의 가상계좌 상태 (--init --model v1223)
@@ -43,7 +48,7 @@ v1.2.3.7 전환 때 v1236 유지 + v1237 복제, v1.2.3.8 전환 때 v1237 유�
     — LLV vol_scale.json 과 같은 정의를 EOD 재현 (과거일 재생이 가능하도록 자체 계산)
 
 데이터: LLV core/extend parquet (OHLC) + panel.parquet (YZ_20).
-상태:   data/shadow_{model}_state.json / 로그: data/shadow_{model}_equity.csv
+상태:   state/shadow_{model}_state.json / 로그: state/shadow_{model}_equity.csv
 
 실행 (맥미니, 평일 20:35 이후 — 20:30 KIS 배치로 당일 종가 확정 후):
   python3 shadow_track.py --init --model v1223    # 최초 1회: 가상계좌 state.json 에서 분기
@@ -63,11 +68,13 @@ import pandas as pd
 
 import strategy_reference as SR          # 진입 필터(R²·YZR) 정본 — 운영 엔진과 같은 함수를 쓴다
 
-KMS = Path(__file__).resolve().parent
-STOLAB = KMS.parents[1]
-LLV = STOLAB / "longlivevault"
+HERE = Path(__file__).resolve().parent                    # MagicFormula/swing/
+STOLAB = HERE.parents[1]
+LLV = STOLAB / "LongLiveVault"
 SP_PAPER = STOLAB / "StockPortfolio" / "data" / "paper"
-DATA = KMS / "data"
+STATE = HERE / "state"                                    # 그림자 상태·로그 (git 밖)
+# 이전 전 위치 — 첫 실행 때 한 번 복사만 한다 (2026-11-15). 미니에 옛 파일이 다 옮겨진 뒤 지워도 되는 상수.
+LEGACY_STATE = STOLAB / "MagicFormula" / "korean_mkt_study" / "data"
 
 BUY_FEE, SELL_FEE, SELL_TAX = 0.00015, 0.00015, 0.002
 STOP_FILL = 0.995
@@ -75,7 +82,7 @@ ALLOW_SINGLE_SHARE = True
 
 MODELS = {
     "v1112": dict(
-        label="v1.1.1.2", universe="fixed:universe_2026-07_4jo_25pct.json",
+        label="v1.1.1.2", universe="fixed:megagalaxy_2026-07-01.json",
         high_window=60, high_min_p=30, trend_ma=120, trend_min_p=80, pullback=0.90,
         slot_krw=2_000_000.0, max_pos=20, max_slots=2, count_by="slots",
         stop_switch=5, stop_early=0.20, stop_late_up=0.05, stop_late_flat=0.15,
@@ -142,37 +149,43 @@ MODELS = {
 }
 
 
+def _migrate_legacy(path: Path) -> None:
+    """swing/state/ 에 없고 옛 위치(korean_mkt_study/data/)에 있으면 복사 (2026-11-15 이전 1회용)."""
+    if path.exists():
+        return
+    old = LEGACY_STATE / path.name
+    if old.exists():
+        import shutil
+        STATE.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(old, path)
+        print(f"  ↪ 옛 위치에서 복사: {old} → {path}")
+
+
 def files(model: str) -> tuple[Path, Path]:
-    return DATA / f"shadow_{model}_state.json", DATA / f"shadow_{model}_equity.csv"
+    STATE.mkdir(parents=True, exist_ok=True)
+    st, eq = STATE / f"shadow_{model}_state.json", STATE / f"shadow_{model}_equity.csv"
+    _migrate_legacy(st)
+    _migrate_legacy(eq)
+    return st, eq
 
 
 # ── 유니버스 ────────────────────────────────────────────────────────────────
 def _universe_docs() -> list[dict]:
-    """메가갤럭시 문서 목록. 2026-11-14 (케인 — 명단 정본 = LLV): LLV groups/megagalaxy_*.json 1순위
-    (MF 이력 2026-07~ 이관분 포함). LLV 명단이 없을 때만 이 폴더의 universe_*.json (종전)."""
-    try:
-        import sys
-        if str(LLV) not in sys.path:
-            sys.path.insert(0, str(LLV))
-        from stolab_data import ticker_groups
-        docs = ticker_groups.list_docs("megagalaxy")
-        if docs:
-            return docs
-    except Exception as e:                                    # noqa: BLE001
-        print(f"  ⚠ LLV 메가갤럭시 명단 읽기 실패 — MF 파일로 폴백 ({e})")
-    return _mf_universe_docs()
+    """메가갤럭시 문서 목록 — LLV groups/megagalaxy_*.json (2026-07~ 이관분 포함, 적용일 오름차순).
 
-
-def _mf_universe_docs() -> list[dict]:
-    docs = []
-    for f in sorted(DATA.glob("universe_*.json")):
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-            if d.get("stocks"):
-                d["_file"] = f.name
-                docs.append(d)
-        except Exception:
-            pass
+    2026-11-15 (케인 — 한 방향 원칙): 연구 폴더 universe_*.json 폴백 제거. LLV 명단이 비거나 못 읽으면
+    예외로 멈춘다 — 옛 명단으로 조용히 도는 것보다 그날 그림자 1회 실패가 낫다.
+    """
+    import sys
+    if str(LLV) not in sys.path:
+        sys.path.insert(0, str(LLV))
+    from stolab_data import ticker_groups
+    docs = ticker_groups.list_docs("megagalaxy")
+    if not docs:
+        raise RuntimeError(f"LLV 메가갤럭시 명단이 없음 ({LLV / 'groups'})")
+    for d in docs:                                            # 옛 MF 형식 호환: stocks 가 없으면 members 로
+        if not d.get("stocks"):
+            d["stocks"] = [{"ticker": t, "name": t} for t in d.get("members", [])]
     return docs
 
 
@@ -193,7 +206,7 @@ def universe_for(model: str, d: pd.Timestamp) -> dict:
     spec = MODELS[model]["universe"]
     if spec.startswith("fixed:"):
         name = spec.split(":", 1)[1]
-        return next(x for x in _mf_universe_docs() if x["_file"] == name)
+        return next(x for x in _universe_docs() if x["_file"] == name)
     docs = _universe_docs()
     day = d.strftime("%Y-%m-%d")
     ok = [x for x in docs if _effective_of(x) and _effective_of(x) <= day]
@@ -206,7 +219,7 @@ def all_universe_tickers(model: str) -> tuple[list[str], dict]:
     tks, names = set(), {}
     spec = MODELS[model]["universe"]
     if spec.startswith("fixed:"):
-        docs = [x for x in _mf_universe_docs() if x["_file"] == spec.split(":", 1)[1]]
+        docs = [x for x in _universe_docs() if x["_file"] == spec.split(":", 1)[1]]
     else:
         docs = _universe_docs()
     for doc in docs:

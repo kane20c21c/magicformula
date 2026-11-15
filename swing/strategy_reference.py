@@ -1,5 +1,9 @@
 """strategy_reference.py — 대형·고외국인 눌림목 진입 전략 참조 구현.
 
+⚠ 2026-11-15 (케인 — 한 방향 원칙): **운영 정본** 위치 = MagicFormula/swing/ (종전 korean_mkt_study/).
+  운영(SP paper·realstop, swing/shadow_track)이 이 파일을 import 하고, 연구(korean_mkt_study)는 이것을 기준선으로
+  읽기만 한다. 규칙 변경 = 연구에서 확정 → 이 파일 수정 + 버전 올림 + 회귀 테스트 → 커밋 (MF CLAUDE.md "연구 확정 → 운영 반영").
+
 **v1.2.3.4 (확정 2026-09-12, 적용 2026-09-14~)** — 버전 체계: 모델.유니버스.진입규칙.청산규칙
 (각 자리는 최초 설정이 1, 조정할 때마다 +1)
   모델 1      : 기본 아이디어 불변 (좋은 유니버스 안에서의 눌림목 매수 타이밍)
@@ -15,7 +19,7 @@
   사이징      : 20슬롯×500만 → **10슬롯×1,000만** (가상계좌 10×400만, 종목 수로 카운트)
 
 직전 운영 모델 **v1.2.2.3** 과 그 전 **v1.1.1.2** 를 그림자 모드로 추적한다
-(korean_mkt_study/shadow_track.py, Kane 지시 2026-09-12).
+(swing/shadow_track.py, Kane 지시 2026-09-12).
 근거: korean_mkt_study/R2YZ_눌림목연구_20260912.md (11년 신호 12만 건 + 포트 시뮬).
 
 목적: Kane의 맥미니 데이터수집/실시간 모니터링 프로젝트가 그대로 import 하여
@@ -386,14 +390,16 @@ def screen_today(
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# 4) 자체 점검용 데모 (Kane repo 에서 실행)
+# 4) 자체 점검용 데모 — 연구 데이터 폴더를 인자로 줘야 돈다 (운영은 이 블록을 쓰지 않는다)
 # ────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1]   # korea_momentum_research/
-    data = root / "data"
+    if len(sys.argv) < 2:
+        print("사용: python3 strategy_reference.py <prices/meta/foreign.parquet 가 있는 데이터 폴더>")
+        sys.exit(0)
+    data = Path(sys.argv[1])
     try:
         close = pd.read_parquet(data / "prices.parquet")["close"].astype("float64").unstack("ticker").sort_index()
         meta = pd.read_parquet(data / "meta.parquet")

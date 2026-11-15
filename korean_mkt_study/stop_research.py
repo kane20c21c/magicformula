@@ -23,6 +23,7 @@ import numpy as np, pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "swing"))   # 운영 정본 strategy_reference (2026-11-15 이전) — 연구는 읽기만
 import backtest as bt
 import strategy_reference as sr
 

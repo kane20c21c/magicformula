@@ -27,9 +27,12 @@ import json
 import shutil
 from pathlib import Path
 
+import sys
+
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "swing"))   # 운영 정본 (2026-11-15 이전) — 연구는 읽기만
 import shadow_track as T
 
 KMS = Path(__file__).resolve().parent

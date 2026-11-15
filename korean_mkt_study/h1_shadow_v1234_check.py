@@ -2,15 +2,16 @@
 
 가상계좌 백업 상태(기본 9/13 = v1.2.3.4 적용 직전)에서 분기해 그림자 엔진으로 하루씩 전진시키고,
 같은 기간 실제 가상계좌(data/paper/trades.csv · equity.csv)와 매수·매도·총자산을 대조한다.
-운영 파일(data/shadow_*)은 건드리지 않는다 — 산출은 out/h1/shadow_v1234_check/.
+운영 파일(swing/state/shadow_*)은 건드리지 않는다 — 산출은 out/h1/shadow_v1234_check/.
 """
 from __future__ import annotations
 import contextlib, copy, io, json, sys
 from pathlib import Path
 import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "swing"))   # 운영 정본 (2026-11-15 이전) — 연구는 읽기만
 import shadow_track as T
 
-OUT = T.KMS / "out" / "h1" / "shadow_v1234_check"; OUT.mkdir(parents=True, exist_ok=True)
+OUT = Path(__file__).resolve().parent / "out" / "h1" / "shadow_v1234_check"; OUT.mkdir(parents=True, exist_ok=True)
 FORK = sys.argv[1] if len(sys.argv) > 1 else "20260913"
 END = pd.Timestamp(sys.argv[2] if len(sys.argv) > 2 else "2026-10-02")
 MODEL = sys.argv[3] if len(sys.argv) > 3 else "v1234"

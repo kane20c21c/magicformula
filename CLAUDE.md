@@ -20,13 +20,34 @@
 
 ---
 
+## 한 방향 원칙 — 연구 확정 → 운영 반영 (2026-11-15 케인)
+
+**운영은 연구 폴더(`korean_mkt_study/`)를 직접 읽지 않는다. 연구는 운영 코드를 기준선으로 읽기만 한다.**
+연구 결과는 운영 코드에 **커밋으로 반영**되고, 운영은 그것만 읽는다 (`market_layer/`·`bounce_rule/` 이 처음부터 이 방식).
+
+| | 운영 | 연구 |
+|---|---|---|
+| 스윙 포트 규칙 | `swing/strategy_reference.py` (SP paper·realstop 이 import) | `korean_mkt_study/backtest.py` 등 — `swing/` 을 import 해 비교 |
+| 그림자 추적 | `swing/shadow_track.py` (팩트 체인 5단계, 상태 `swing/state/` git 밖) | `shadow_replay.py`·`h1_shadow_*` 가 엔진을 import 해 재생 |
+| 메가갤럭시 명단 | LLV `groups/megagalaxy_*.json` | (연구는 자체 데이터로 재계산) |
+| 데이터 | LLV (미니, 2023~ 종목 패널 + 2015~ 지수·파생) | `korean_mkt_study/` 데이터 세트 (에어, 2015~, KRX 직접 수집) |
+
+절차 (상세 `swing/README.md`):
+1. 연구에서 운영 코드를 import 해 실험·검증 (연구 쪽 사본 금지).
+2. 케인 확정 → 운영 코드 수정 + 버전 올림 + 연구 결과의 특정 날짜 재현 회귀 테스트(`tests/`).
+3. 직전 모델은 그림자로 남김 → 커밋 → 케인 push → 미니 pull (+ SP 재시작).
+
+⚠ `tests/test_swing_relocation.py` 가 운영 코드(`swing/`·SP `app/paper/`)에 경로 성분 `"korean_mkt_study"` 가 없음을 검사한다.
+
+---
+
 ## 룰 5개
 
 | # | 룰 | 폴더 | 스펙 정본 | 성격 |
 |---|---|---|---|---|
 | 1 | **황금률** | `magic_formula/` | `configs/active_strategy.yaml` | 진입신호 (종목 점수) |
 | 2 | **데이 포트** | `mop_model/` | `mop_model/CLAUDE.md` | 1일 스윙 (ML) |
-| 3 | **스윙 포트** | `korean_mkt_study/` | `STRATEGY.md` + `strategy_spec.json` | 눌림목 진입 |
+| 3 | **스윙 포트** | `swing/` (운영) · `korean_mkt_study/` (연구) | `swing/strategy_reference.py` + SP `app/paper/config.py` · 연구 기록 `korean_mkt_study/STRATEGY.md` | 눌림목 진입 |
 | 4 | **화이트 포트** | `mop_model/` (데이 포트와 공유) | SP `WHITEPORT_DESIGN.md` + `mop_model/src/intra.py` | 장중 드리프트 (ML, 낮) |
 | 5 | **반등 룰** | `bounce_rule/` | `bounce_rule/README.md` + `config.py` | 깊은 드라이브 뒤 강한 첫 반등 — **신호 전용** (2026-11-02) |
 | — | ~~발열률~~ | → **SpotGauge** | `SpotGauge/CLAUDE.md` | 시장 관측기 (이관 중) |
@@ -121,11 +142,11 @@ R1 **v1.1.1.2** 구진입 5×4백만 / R2 **v1.1.3.2** 10×2백만+섹터캡3 / 
 16:10 애프터마켓 매도, 호가 없으면 15:30 종가). 그 뒤로는 ③만 — 상시 평단선·시간청산·목표가는 전부 기각.
 사이징 **10슬롯 × 400만**(종목 수 카운트, max2 유지) — 시뮬은 MDD −16→−30% 를 경고했으나 Kane 이 확정.
 실계좌(깨비·원둘·미래)는 필터·D+6 모두 **알림까지만**, 실행은 Kane.
-그림자 2개: **v1.2.2.3**(10×400만으로 규칙 효과만) + **v1.1.1.2**(20×200만 유지) — `korean_mkt_study/shadow_track.py`.
+그림자 2개: **v1.2.2.3**(10×400만으로 규칙 효과만) + **v1.1.1.2**(20×200만 유지) — `swing/shadow_track.py` (2026-11-15 이전).
 근거 = `korean_mkt_study/R2YZ_눌림목연구_20260912.md` (11년 신호 12만 건 + 포트 시뮬, 라이브 조건):
 base 2.03억·Sharpe 0.68·MDD −23.2% → v1.2.3.4(20슬롯) 2.16억·0.84·−16.1%. 기대치는 고원(2.1~2.2억)으로.
 
-⚠ **정본 위치**: 진입 필터·상수 = `strategy_reference.py` (`compute_entry_filter`), 청산·D+6·사이징 =
+⚠ **정본 위치**: 진입 필터·상수 = `swing/strategy_reference.py` (`compute_entry_filter`), 청산·D+6·사이징 =
 `StockPortfolio/app/paper/config.py` (`check_day=6`, `check_at`, `check_sell_at`, `max_positions=10`, `slot_krw=400만`).
 ⚠ 규칙 실험은 `korean_mkt_study/backtest.py` (+ `r2_yz_s3_portsim.run_backtest2` 가 시간청산·조건검사 확장).
 ⚠ 기각목록 STRATEGY.md §11 (2026-09-12 블록 포함) 을 먼저 읽을 것.

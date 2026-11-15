@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-KMS = Path(__file__).resolve().parents[1] / "korean_mkt_study"
-sys.path.insert(0, str(KMS))
+SWING = Path(__file__).resolve().parents[1] / "swing"          # 2026-11-15 운영 패키지로 이전
+sys.path.insert(0, str(SWING))
 import shadow_track as st  # noqa: E402
 
 DOCS = [

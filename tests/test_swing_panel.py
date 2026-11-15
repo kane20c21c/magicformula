@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "korean_mkt_study"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "swing"))   # 2026-11-15 운영 패키지로 이전
 import strategy_reference as sr  # noqa: E402
 
 

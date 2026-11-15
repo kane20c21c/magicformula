@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""korean_mkt_study/shadow_track.py — v1238 (stop_mode=close) 분기: 종가 확인 → 익일 시가 체결, peak 종가 기준.
+"""swing/shadow_track.py — v1238 (stop_mode=close) 분기: 종가 확인 → 익일 시가 체결, peak 종가 기준.
 LLV·유니버스 파일 없이 합성 가격으로 advance() 를 돌린다 (load_prices·유니버스·진입필터 monkeypatch)."""
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 
 import numpy as np, pandas as pd, pytest
 
-KMS = Path(__file__).resolve().parents[1] / "korean_mkt_study"
-sys.path.insert(0, str(KMS))
-spec = importlib.util.spec_from_file_location("shadow_track", KMS / "shadow_track.py")
+SWING = Path(__file__).resolve().parents[1] / "swing"          # 2026-11-15 운영 패키지로 이전
+sys.path.insert(0, str(SWING))
+spec = importlib.util.spec_from_file_location("shadow_track", SWING / "shadow_track.py")
 st = importlib.util.module_from_spec(spec); spec.loader.exec_module(st)
 
 TK = "000001"
@@ -22,7 +22,8 @@ def _prices(dates, open_, high, low, close):
 
 
 def _run(tmp_path, monkeypatch, model, prices, dates):
-    monkeypatch.setattr(st, "DATA", tmp_path)
+    monkeypatch.setattr(st, "STATE", tmp_path)
+    monkeypatch.setattr(st, "LEGACY_STATE", tmp_path / "_no_legacy")
     monkeypatch.setattr(st, "load_prices", lambda tickers, start="2025-06-01": prices)
     monkeypatch.setattr(st, "all_universe_tickers", lambda m: ([TK], {TK: "테스트"}))
     monkeypatch.setattr(st, "universe_for", lambda m, d: {"stocks": [{"ticker": TK, "name": "테스트"}]})
