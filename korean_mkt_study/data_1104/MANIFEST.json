@@ -1,0 +1,109 @@
+{
+ "status": "retired",
+ "role": "은퇴 — data/ 를 LLV 패널·raw 로 ~2026-11-04 연장한 사본 (한 방향 원칙 이전 방식). 끝난 연구 재현용",
+ "sources": "data/ + LLV panel.parquet + LLV data/raw",
+ "files": {
+  "benchmark.parquet": {
+   "rows": 198,
+   "mb": 0.0,
+   "columns": [
+    "BENCH_KOSPI200",
+    "date"
+   ],
+   "start": "2010-01-31",
+   "end": "2026-06-30",
+   "n_dates": 198
+  },
+  "foreign.parquet": {
+   "rows": 455986,
+   "mb": 6.5,
+   "columns": [
+    "foreign_ratio",
+    "exhaustion",
+    "foreign_shares",
+    "listed_shares",
+    "limit_shares",
+    "date",
+    "ticker"
+   ],
+   "start": "2010-01-31",
+   "end": "2026-10-31",
+   "n_dates": 202,
+   "n_tickers": 3689
+  },
+  "index_kospi.parquet": {
+   "rows": 198,
+   "mb": 0.0,
+   "columns": [
+    "KOSPI_close",
+    "KOSPI_ret",
+    "date"
+   ],
+   "start": "2010-01-31",
+   "end": "2026-06-30",
+   "n_dates": 198
+  },
+  "kospi200_daily.parquet": {
+   "rows": 2905,
+   "mb": 0.2,
+   "columns": [
+    "Close",
+    "UpDown",
+    "Comp",
+    "Change",
+    "Open",
+    "High",
+    "Low",
+    "Volume",
+    "Amount",
+    "MarCap",
+    "Date"
+   ],
+   "start": "2015-01-02",
+   "end": "2026-11-04",
+   "n_dates": 2905
+  },
+  "meta.parquet": {
+   "rows": 455986,
+   "mb": 10.1,
+   "columns": [
+    "mktcap",
+    "value",
+    "shares",
+    "foreign",
+    "market",
+    "is_pref",
+    "is_spac",
+    "is_managed",
+    "listing_date",
+    "sector",
+    "foreign_exhaustion",
+    "name",
+    "date",
+    "ticker"
+   ],
+   "start": "2010-01-31",
+   "end": "2026-10-31",
+   "n_dates": 202,
+   "n_tickers": 3689
+  },
+  "prices.parquet": {
+   "rows": 6636273,
+   "mb": 99.4,
+   "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "date",
+    "ticker"
+   ],
+   "start": "2010-01-04",
+   "end": "2026-11-04",
+   "n_dates": 4144,
+   "n_tickers": 3246
+  }
+ },
+ "manifest_updated": "2026-11-15 13:21"
+}

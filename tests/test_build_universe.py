@@ -26,15 +26,16 @@ def _setup(tmp_path):
     add("000010", "대형외인", 5e12, 35.0)
     add("000020", "대형내국", 5e12, 20.0)          # 외인 미달
     add("000030", "중형외인", 3e12, 50.0)          # 시총 미달
-    add("000040", "스팩", 6e12, 40.0)              # meta 스팩
+    add("000040", "스팩", 6e12, 40.0)              # issue_status 스팩
     add("000055", "우선주", 6e12, 40.0)            # 끝자리 ≠ 0
     add("102110", "TIGER200", 9e12, 40.0)          # ETF
     add("000060", "옛값", 6e12, 40.0, last="2026-10-14")   # 기준일 근처 값 없음
     pd.DataFrame(rows).to_parquet(llv / "ohlcv" / "panel.parquet")
-    meta = pd.DataFrame([{"date": pd.Timestamp("2026-09-30"), "ticker": t, "is_pref": False,
-                          "is_spac": t == "000040", "is_managed": False}
-                         for t in ("000010", "000020", "000030", "000040", "000055", "000060")]).set_index(["date", "ticker"])
-    mp = tmp_path / "meta.parquet"; meta.to_parquet(mp)
+    # 제외 표시 = LLV issue_status 형식 (2026-11-15 — 종전 MF data_ext/meta 대신). 10-26 스냅샷 = 두 기준일 모두 7일 안
+    st = pd.DataFrame([{"Date": pd.Timestamp("2026-10-26"), "Ticker": t, "Managed": False, "Spac": t == "000040",
+                        "Pref": False, "Liquidation": False}
+                       for t in ("000010", "000020", "000030", "000040", "000055", "000060")])
+    mp = tmp_path / "issue_status.parquet"; st.to_parquet(mp, index=False)
     raw = pd.DataFrame([{"Ticker": "000010", "Name": "대형외인", "MarketCap": 5e12},
                         {"Ticker": "000990", "Name": "패널밖대형", "MarketCap": 7e12},
                         {"Ticker": "000995", "Name": "패널밖우선", "MarketCap": 7e12}])
@@ -44,7 +45,7 @@ def _setup(tmp_path):
 
 def test_filters_and_warnings(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=0)
+    r = BU.build(date(2026, 10, 30), llv=llv, issue_status_path=mp, min_count=0)
     assert [s["ticker"] for s in r["stocks"]] == ["000010"]
     assert r["apply_month"] == "2026-11" and r["base_date"] == "2026-10-30"
     pv = r["data_provenance"]
@@ -59,7 +60,7 @@ def test_december_rolls_to_january():
 
 def test_uses_value_on_or_before_base(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 27), llv=llv, meta_path=mp, min_count=0)
+    r = BU.build(date(2026, 10, 27), llv=llv, issue_status_path=mp, min_count=0)
     assert r["apply_month"] == "2026-10" and r["effective_date"] == "2026-10-28" and r["count"] == 1
 
 
@@ -78,7 +79,7 @@ WD = lambda d: d.weekday() < 5          # noqa: E731 — 거래일 캘린더 대
 
 def test_floor_fills_from_panel_by_mktcap(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=2)
+    r = BU.build(date(2026, 10, 30), llv=llv, issue_status_path=mp, min_count=2)
     assert [s["ticker"] for s in r["stocks"]] == ["000010", "000030"]          # 4조/30% 1 + 바닥(외인 50%·3조) 1
     assert r["count_rule"] == 1 and r["floor_filled"] == ["000030"] and r["floor_shortfall"] == 0
     assert [s["rule"] for s in r["stocks"]] == ["4jo_30pct", "floor"]
@@ -87,7 +88,7 @@ def test_floor_fills_from_panel_by_mktcap(tmp_path):
 
 def test_floor_never_goes_outside_panel(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=30)
+    r = BU.build(date(2026, 10, 30), llv=llv, issue_status_path=mp, min_count=30)
     tk = {s["ticker"] for s in r["stocks"]}
     assert "000990" not in tk                                                  # KRX 원본에만 있는 종목은 채우지 않음
     assert tk == {"000010", "000030"} and r["floor_shortfall"] == 28
@@ -96,7 +97,7 @@ def test_floor_never_goes_outside_panel(tmp_path):
 
 def test_floor_noop_when_rule_has_enough(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=1)
+    r = BU.build(date(2026, 10, 30), llv=llv, issue_status_path=mp, min_count=1)
     assert r["floor_filled"] == [] and r["count"] == 1
 
 
@@ -110,5 +111,5 @@ def test_expiry_week_friday_and_effective():
 
 def test_effective_date_mid_month(tmp_path):
     llv, mp = _setup(tmp_path)
-    r = BU.build(date(2026, 10, 30), llv=llv, meta_path=mp, min_count=0, effective=date(2026, 11, 16))
+    r = BU.build(date(2026, 10, 30), llv=llv, issue_status_path=mp, min_count=0, effective=date(2026, 11, 16))
     assert r["effective_date"] == "2026-11-16" and r["apply_month"] == "2026-11" and r["base_date"] == "2026-10-30"

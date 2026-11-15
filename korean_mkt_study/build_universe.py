@@ -14,7 +14,7 @@ build_universe.py — 스윙 유니버스 월 파일 생성 (STRATEGY.md §2 · 
 규칙 (유니버스 2번째, 2026-08-17 케인 확정): 기준일(월말) 시총 ≥ 4조원 & 외국인지분율 ≥ 30%,
   우선주·스팩·관리종목·ETF 제외. 다음 달 첫 거래일부터 적용, 월중 유지.
 원천 (9월분과 같게): LLV panel.parquet 의 MarketCap·Foreign_Ratio — 기준일 이전 마지막 유효값.
-  제외 플래그 = data_ext/meta.parquet(is_pref·is_spac·is_managed, 기준일 이전 최신 월) + 티커 끝자리≠0 우선주 보조.
+  제외 플래그 = LLV issue_status(관리·스팩·우선주·정리매매, 2026-11-15~ — 종전 data_ext/meta.parquet) + 티커 끝자리≠0 우선주 보조.
   패널 밖 누락 점검 = LLV data/raw/krx_{kospi,kosdaq}_*.parquet 중 기준일 이전 최신 파일의 시총 4조↑ 가운데
   패널에 없는 종목을 경고로 보고(편입은 사람이 판단 — 패널에 없으면 가격·지표도 없다).
 
@@ -79,13 +79,16 @@ def next_month(d: date) -> str:
     return f"{y:04d}-{m:02d}"
 
 
-def build(base: date, max_stale_days: int = 7, llv: Path = LLV, meta_path: Path | None = None,
+def build(base: date, max_stale_days: int = 7, llv: Path = LLV, issue_status_path: Path | None = None,
           min_count: int = MIN_COUNT, effective: date | None = None) -> dict:
-    """메가갤럭시 문서 — LLV ticker_groups.build_megagalaxy 위임 (llv 인자 = 테스트용 data 폴더)."""
+    """메가갤럭시 문서 — LLV ticker_groups.build_megagalaxy 위임 (llv 인자 = 테스트용 data 폴더).
+
+    2026-11-15: 제외 표시 = LLV issue_status (llv/issue_status.parquet). 종전 data_ext/meta.parquet 인자는 제거
+    (한 방향 원칙 — LLV 가 연구 폴더를 읽지 않는다)."""
     panel = pd.read_parquet(llv / "ohlcv" / "panel.parquet", columns=["Date", "Ticker", "Name", "MarketCap", "Foreign_Ratio"])
     eff = effective or next_trading_day(base)
     return _tg().build_megagalaxy(base, max_stale_days=max_stale_days, min_count=min_count, effective=eff,
-                                  panel=panel, meta_path=meta_path or (HERE / "data_ext" / "meta.parquet"),
+                                  panel=panel, issue_status_path=issue_status_path or (llv / "issue_status.parquet"),
                                   raw_dir=llv / "raw")
 
 

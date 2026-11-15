@@ -107,18 +107,29 @@ output/redesign_pos52_panel.parquet
 ~$*
 
 # 2026-09-12 스윙 포트 데이터 연장 사본 (build_data_ext.py 로 재생성 — 정본은 data/ 스냅샷)
-korean_mkt_study/data_ext/
+korean_mkt_study/data_ext/*
 
 # 2026-10-30 기간 재구성 세트(2015-01-02~2026-10-29, 294MB) + pykrx 중간 캐시 — 생성은 rebuild_data_2015.py
-korean_mkt_study/data_2015/
+korean_mkt_study/data_2015/*
 korean_mkt_study/_cache_2015/
 
 # 급락 연구 산출물 (에피소드·피처 parquet, 2026-10-30)
 korean_mkt_study/out/crash/
 # 2026-11-07 KRX 업종지수 수집 중간 캐시 — 생성은 korean_mkt_study/fetch_sector_indices.py
 korean_mkt_study/_cache_sector/
+# 2026-11-15 KRX Open API 응답 캐시 — 생성은 korean_mkt_study/kms_store.py (재생성 가능)
+korean_mkt_study/_cache_krx/
 
 # 2026-11-05 스윙 백테스트 데이터 11-04 연장본(111MB) — 생성은 korean_mkt_study/extend_data_1104.py (정본 data/ 는 그대로)
-korean_mkt_study/data_1104/
+korean_mkt_study/data_1104/*
 # 2026-11-05 국면 감지 비교 지수(14MB) — 생성은 korean_mkt_study/fetch_indices.py (+ 2000~2014 코스피200 pykrx)
-korean_mkt_study/data_idx/
+korean_mkt_study/data_idx/*
+
+# 연구 데이터 세트의 MANIFEST.json 은 추적한다 (2026-11-15 케인 — 한 방향 원칙 · 연구 데이터 체계화).
+# 데이터는 git 밖(에어)이지만 출처·기간·교정 이력은 git 으로 남긴다. 생성 = korean_mkt_study/kms_store.py manifest.
+# ⚠ 위 디렉토리 규칙이 `dir/*` 형태여야 이 예외가 먹는다 (`dir/` 면 git 이 안을 탐색하지 않는다).
+!korean_mkt_study/data/MANIFEST.json
+!korean_mkt_study/data_2015/MANIFEST.json
+!korean_mkt_study/data_ext/MANIFEST.json
+!korean_mkt_study/data_1104/MANIFEST.json
+!korean_mkt_study/data_idx/MANIFEST.json

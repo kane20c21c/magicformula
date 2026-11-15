@@ -1,0 +1,73 @@
+{
+ "status": "current",
+ "role": "지수 보조 — KOSPI200 2000~2014, KRX 지수·업종지수 (fetch_indices.py · fetch_sector_indices.py)",
+ "sources": "pykrx · KRX",
+ "files": {
+  "kospi200_2000_2014.parquet": {
+   "rows": 3709,
+   "mb": 0.1,
+   "columns": [
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "Date"
+   ],
+   "start": "2000-01-04",
+   "end": "2014-12-30",
+   "n_dates": 3709
+  },
+  "krx_indices.parquet": {
+   "rows": 69298,
+   "mb": 3.0,
+   "columns": [
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value",
+    "mktcap",
+    "name",
+    "code"
+   ],
+   "start": "2015-01-02",
+   "end": "2026-11-04",
+   "n_dates": 2905
+  },
+  "krx_sector_indices.parquet": {
+   "rows": 249597,
+   "mb": 11.3,
+   "columns": [
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value",
+    "mktcap",
+    "market",
+    "code",
+    "name"
+   ],
+   "start": "2015-01-02",
+   "end": "2026-10-29",
+   "n_dates": 2901
+  },
+  "krx_sector_members.parquet": {
+   "rows": 57306,
+   "mb": 0.1,
+   "columns": [
+    "snap",
+    "market",
+    "code",
+    "name",
+    "ticker"
+   ]
+  }
+ },
+ "manifest_updated": "2026-11-15 13:21"
+}

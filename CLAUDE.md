@@ -30,7 +30,7 @@
 | 스윙 포트 규칙 | `swing/strategy_reference.py` (SP paper·realstop 이 import) | `korean_mkt_study/backtest.py` 등 — `swing/` 을 import 해 비교 |
 | 그림자 추적 | `swing/shadow_track.py` (팩트 체인 5단계, 상태 `swing/state/` git 밖) | `shadow_replay.py`·`h1_shadow_*` 가 엔진을 import 해 재생 |
 | 메가갤럭시 명단 | LLV `groups/megagalaxy_*.json` | (연구는 자체 데이터로 재계산) |
-| 데이터 | LLV (미니, 2023~ 종목 패널 + 2015~ 지수·파생) | `korean_mkt_study/` 데이터 세트 (에어, 2015~, KRX 직접 수집) |
+| 데이터 | LLV (미니, 2023~ 종목 패널 + 2015~ 지수·파생) | 연구 정본 `korean_mkt_study/data_2015/` (에어, 2015~, KRX 직접 수집) — 로더 `kms_data.py` · 정의 사전 `DATA_DICTIONARY.md` · 연장 `extend_store.py` (필요할 때) |
 
 절차 (상세 `swing/README.md`):
 1. 연구에서 운영 코드를 import 해 실험·검증 (연구 쪽 사본 금지).
