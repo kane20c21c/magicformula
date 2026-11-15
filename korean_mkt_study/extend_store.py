@@ -196,6 +196,7 @@ def main(argv=None):
         step_deriv(to)
     K.write_manifest(STORE, {})
     log(f"완료 ({int(time.time() - t0)}초) — MANIFEST 갱신")
+    log("백업 (케인, 에어): ~/Dev/StoLab/StoLab-meta/scripts/backup_research_to_r2.sh  — 연구 데이터는 에어에만 있다")
 
 
 if __name__ == "__main__":

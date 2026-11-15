@@ -27,6 +27,12 @@
 `kms_store.py` 가 KRX 에서 직접 받는다 — 가격은 KRX Open API 원주가 + 기준가로 수정계수, 외인·펀더멘털·수급은 pykrx,
 pykrx 가 막히면 수급만 한국투자로. **LLV raw·패널을 원천으로 쓰지 않는다.**
 
+## 백업
+
+연구 데이터는 **에어에만** 있고 git 밖이다. 미니의 R2 일일 백업은 미니 StoLab 만 올린다.
+바꾼 뒤(연장·교정) 케인이 `StoLab-meta/scripts/backup_research_to_r2.sh` 를 돌린다 → R2 `<버킷>/air-research/current/`
+(바뀐·지운 파일은 `air-research/_generations/<날짜>/` 에 90일). 처음 한 번 `brew install rclone` + `setup_r2.sh`.
+
 ## 세트 상태
 
 | 세트 | 폴더 | 상태 | 쓰임 |
