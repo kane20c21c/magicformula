@@ -33,6 +33,9 @@ longlivevault 진입점 통합 헬퍼.
 
 universe 식별자
 ---------------
+⚠ 2026-11-14 (케인): StoLab 은 core/extend 개념을 쓰지 않는다 (종목군 = 와이드버스 ⊃ 유니버스 ⊃ 메가갤럭시,
+  명단 정본 = LLV ticker_groups). 아래 core_* 식별자는 **황금률 모델의 모집단**이라 그대로 두었다 —
+  모집단을 메가갤럭시·유니버스로 바꾸면 레짐(횡단면) 판정이 달라지므로 별도 연구 과제로 분리 (케인 2026-11-15).
 - "core_all"        : vault CORE_TICKERS 전체 — 데일리용 (현재 69개)
 - "core_excl_split" : core_all - DEFAULT_EXCLUDE — 백테스트용 (현재 67개)
 - "core_59" / "core_57" : 위의 두 식별자에 대한 deprecated alias
