@@ -30,8 +30,10 @@ pykrx 가 막히면 수급만 한국투자로. **LLV raw·패널을 원천으로
 ## 백업
 
 연구 데이터는 **에어에만** 있고 git 밖이다. 미니의 R2 일일 백업은 미니 StoLab 만 올린다.
-바꾼 뒤(연장·교정) 케인이 `StoLab-meta/scripts/backup_research_to_r2.sh` 를 돌린다 → R2 `<버킷>/air-research/current/`
-(바뀐·지운 파일은 `air-research/_generations/<날짜>/` 에 90일). 처음 한 번 `brew install rclone` + `setup_r2.sh`.
+바꾼 뒤(연장·교정) 케인이 `StoLab-meta/scripts/backup_research_to_r2.sh` 를 돌린다 → R2 **연구 전용 버킷 `stolab-research`**
+의 `air-research/current/` (바뀐·지운 파일은 `air-research/_generations/<날짜>/` 에 90일). 처음 한 번: Cloudflare 에서 버킷과
+그 버킷에만 쓰는 토큰(Object Read & Write) 생성 → `brew install rclone` → `setup_r2.sh`. 운영 버킷(`stolab-backup`)과 나눈 이유:
+R2 의 오래 쓰는 토큰은 버킷 단위로만 좁혀져, 같은 버킷·토큰이면 에어에서 미니 운영 백업을 지울 수 있다 (스크립트가 운영 버킷이면 멈춘다).
 
 ## 세트 상태
 
