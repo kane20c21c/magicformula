@@ -44,4 +44,4 @@ R2 의 오래 쓰는 토큰은 버킷 단위로만 좁혀져, 같은 버킷·토
 | frozen_20260630 | `data/` | 동결 | 2026-11 이전 백테스트 재현 (고치지 않는다) |
 | retired_ext_0911 | `data_ext/` | 은퇴 | LLV 패널로 연장한 사본 — 끝난 연구 재현용 |
 | retired_1104 | `data_1104/` | 은퇴 | LLV 패널·raw 로 연장한 사본 — 끝난 연구 재현용 |
-| indices | `data_idx/` | 보조 | 지수·업종 |
+| indices | `data_idx/` | 보조 | 지수·업종·단기금리(`ecos_rates.parquet` — Rf 기본 = 콜 1일물 CALL1D, 케인 2026-11-17) |

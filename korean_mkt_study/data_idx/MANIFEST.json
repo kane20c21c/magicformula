@@ -1,8 +1,21 @@
 {
  "status": "current",
- "role": "지수 보조 — KOSPI200 2000~2014, KRX 지수·업종지수 (fetch_indices.py · fetch_sector_indices.py)",
- "sources": "pykrx · KRX",
+ "role": "지수 보조 — KOSPI200 2000~2014, KRX 지수·업종지수 (fetch_indices.py · fetch_sector_indices.py), 단기금리 Rf (fetch_rates.py)",
+ "sources": "pykrx · KRX · 한국은행 ECOS",
  "files": {
+  "ecos_rates.parquet": {
+   "rows": 26387,
+   "mb": 0.1,
+   "columns": [
+    "date",
+    "name",
+    "code",
+    "rate"
+   ],
+   "start": "2000-01-04",
+   "end": "2026-11-16",
+   "n_dates": 6783
+  },
   "kospi200_2000_2014.parquet": {
    "rows": 3709,
    "mb": 0.1,
@@ -69,5 +82,5 @@
    ]
   }
  },
- "manifest_updated": "2026-11-15 13:21"
+ "manifest_updated": "2026-11-17 07:41"
 }

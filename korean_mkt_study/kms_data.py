@@ -46,8 +46,8 @@ SETS = {
     },
     "indices": {
         "path": HERE / "data_idx", "status": "current",
-        "role": "지수 보조 — KOSPI200 2000~2014, KRX 지수·업종지수 (fetch_indices.py · fetch_sector_indices.py)",
-        "sources": "pykrx · KRX",
+        "role": "지수 보조 — KOSPI200 2000~2014, KRX 지수·업종지수 (fetch_indices.py · fetch_sector_indices.py), 단기금리 Rf (fetch_rates.py)",
+        "sources": "pykrx · KRX · 한국은행 ECOS",
     },
 }
 
