@@ -42,6 +42,12 @@ XS/G1/G5 100개 피처가 `groupby("Date").rank(pct=True)` — 그날 유니버�
 **과거 전 구간 값이 바뀐다** → LLV parquet 의 종목단위 upsert 계약(`_upsert_and_recompute`, `SUPPLY_COLS` 보존)과
 정면충돌. 게다가 lightgbm/catboost 의존성이 LLV 를 import 하는 전 프로젝트로 번진다.
 
+## 그림자 v3 = 데이포트 2.0 후보 BG1MD (2026-11-17 케인)
+
+`run_daily.py --variant v3` → `output/signals_v3` (SP 데이 그림자 R11, 저녁 체인 15단계). 97피처 = 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일 + 종목 드라이브 4.
+정의 정본 = `src/features_v3.py` — cols.json·features.parquet 에는 없고 신호 때 메모리에서 붙인다(운영 v1·v2 무접촉).
+⚠ 시장 10 은 `market_layer.judge` 를 신호 시점 자료(그날 브레드스 = 한국투자 잠정)로 계산한다. 테스트 `tests/test_mop_v3_variant.py`.
+
 ## 데이 유니버스 규칙 — v1.2.2.5 (케인 U7 확정 2026-11-03 · 11-16 적용)
 
 - 용어 (2026-11-14 케인): 이 '데이 유니버스'를 대화·문서에서는 **유니버스**라 부르고, 그 모집단 'LLV 멤버' 는 **와이드버스**다 (`StoLab/CLAUDE.md` '공용 용어 — 종목군 3층'). 코드 이름은 그대로.

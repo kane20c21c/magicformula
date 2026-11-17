@@ -32,6 +32,10 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   output/signals_v2 에만 쓴다. 운영 output/signals 는 건드리지 않는다. 데이 그림자 R9 가 읽는다.
   python3 run_daily.py --variant v2      # (features 는 앞선 운영 --rebuild 가 만든 것을 재사용)
 
+★ 그림자 v3(--variant v3, 2026-11-17 케인 — 데이포트 2.0 후보 BG1MD 97): 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일
+  + 종목 드라이브 4. cols.json 에 없고 features_v3.add_v3 가 신호 때 메모리에서 붙인다. output/signals_v3 에만 쓴다. 데이 그림자 R11.
+  python3 run_daily.py --variant v3
+
 ★ 화이트포트(--target y_intra): 같은 features.parquet 에 intra.py 의 타깃·5피처를 얹어
   "익일 시가→종가가 그날 중앙값보다 큰가" 를 학습한다. 신호는 별도 디렉터리에만 쓴다 —
   데이포트 경로(output/signals)·기본 동작은 옵션을 안 주면 전과 같다.
@@ -69,7 +73,9 @@ PROFILES = {
 
 
 # 피처 변형 — v1 = 운영 CHAMPION(148). v2 = 그림자(146), 데이포트 타깃 전용.
-VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2"}
+# v3 = 데이포트 2.0 후보 BG1MD(97, 2026-11-17 케인) — cols.json 에 없고 features_v3 가 신호 때 메모리에서 붙인다.
+V3_KEY = "BG1MD"
+VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2", "v3": V3_KEY}
 
 
 def resolve_profile(target=None, variant="v1"):
@@ -109,9 +115,14 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
 
     d = pd.read_parquet(cfg.FEATURES).sort_values(["Date", "Ticker"]).reset_index(drop=True)
     cols_all = json.load(open(cfg.COLS_JSON))
-    if prof["cols_key"] not in cols_all:
-        raise SystemExit(f"cols.json 에 {prof['cols_key']} 없음 — build_features 재실행 필요 (--rebuild)")
-    cols = cols_all[prof["cols_key"]]
+    if prof["cols_key"] == V3_KEY:
+        import features_v3 as F3
+        d = F3.add_v3(d, as_of=today or d.Date.max())
+        cols = F3.v3_cols(cols_all)
+    else:
+        if prof["cols_key"] not in cols_all:
+            raise SystemExit(f"cols.json 에 {prof['cols_key']} 없음 — build_features 재실행 필요 (--rebuild)")
+        cols = cols_all[prof["cols_key"]]
     lack = [c for c in cols if c not in d.columns]
     if lack:
         raise SystemExit(f"features.parquet 에 피처 누락 {lack[:5]} — build_features 재실행 필요 (--rebuild)")
@@ -191,7 +202,7 @@ if __name__ == "__main__":
     ap.add_argument("--target", default=None, help="y_rel(기본, 데이포트) | y_intra(화이트포트)")
     ap.add_argument("--signal-dir", default=None, help="신호 JSON 디렉터리 (기본: 타깃별 프로필)")
     ap.add_argument("--variant", default="v1", choices=sorted(VARIANTS),
-                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2")
+                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2 | v3 = 2.0 후보 BG1MD(97) → output/signals_v3")
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
