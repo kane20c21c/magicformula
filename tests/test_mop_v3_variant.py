@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-tests/test_mop_v3_variant.py — 데이포트 그림자 v3 (run_daily --variant v3 = 2.0 후보 BG1MD 97) 회귀 테스트 (2026-11-17)
+tests/test_mop_v3_variant.py — 데이포트 그림자 v3 (run_daily --variant v3 = 2.0 후보 BG1MDpc 99) 회귀 테스트 (2026-11-17)
 =========================================================================================================
 결정: 케인 2026-11-17 — 데이포트 2.0 피처 사다리에서 cur 과 함께 기준으로 둔 BG1MD 를 그림자 R11 로 붙인다.
 
 지키는 것:
-  1) v3 구성 = 정리 BASE 41 + 그 대섹터 순위 41 + 시장 10 + 요일 + 종목 드라이브 4 = 97, 중복 없음,
+  1) v3 구성 = 정리 BASE 41 + 그 대섹터 순위 41 + 시장 10 + 요일 + 휴장 달력 2 + 종목 드라이브 4 = 99, 중복 없음,
      미래 정보(vol_idx·wy_*)·기준점(close_idx)·같은 값 중복(vol_ratio·energy_index) 제외
   2) 드라이브 정의 (길이 부호·크기·속도·갭 몫)
   3) add_v3 는 행 수·순서를 바꾸지 않고, 시장 값은 날짜로, 대섹터 순위는 5종목 이상 섹터에만 붙인다
   4) --variant v3 는 output/signals_v3 로만 쓰고 데이포트 타깃 전용이다
+  5) 휴장 달력 — 거래일 목록 안은 목록으로, 마지막 날의 다음 거래일은 달력 함수로 (11-17 17:29 케인 (가))
 모델 학습 없음 — 합성 패널, 시장·YZ 는 주입.
 """
 from __future__ import annotations
@@ -42,8 +43,8 @@ def _cols_all():
 
 def test_v3_cols_composition():
     cols = F3.v3_cols(_cols_all())
-    assert len(cols) == 97 and len(set(cols)) == 97
-    for c in ["vol_idx_c", "YZ_20", "YZ_60", "s1_YZ_20", "s1_vol_idx_c", "s1_rsi", "m_p7", "m_rv18", "m_drv_gap", "dow", "sdrv_gap"]:
+    assert len(cols) == 99 and len(set(cols)) == 99
+    for c in ["cal_next", "cal_prev", "vol_idx_c", "YZ_20", "YZ_60", "s1_YZ_20", "s1_vol_idx_c", "s1_rsi", "m_p7", "m_rv18", "m_drv_gap", "dow", "sdrv_gap"]:
         assert c in cols, c
     for c in ["vol_idx", "wy_label", "wy_phase", "close_idx", "vol_ratio", "energy_index", "smart_pressure",
               "retail_pressure", "hope_vector", "s1_dow", "xs_rsi", "s5_rsi"]:
@@ -69,20 +70,30 @@ def test_add_v3_keeps_rows_and_fills():
     days = pd.DatetimeIndex(sorted(px.Date.unique()))
     mk = pd.DataFrame({c: np.arange(len(days), dtype=float) for c in F3.MCOL}, index=days)
     yz = px[["Date", "Ticker"]].copy(); yz["YZ_20"] = np.linspace(0.01, 0.05, len(yz)); yz["YZ_60"] = yz.YZ_20 * 2
-    out = F3.add_v3(d, market=mk, yz=yz)
+    cal = pd.DataFrame({"cal_next": 1.0, "cal_prev": 1.0}, index=days)
+    out = F3.add_v3(d, market=mk, yz=yz, cal=cal)
     assert len(out) == len(d) and (out.index == d.index).all()
     i = out.index[0]
     assert out.loc[i, "m_p7"] == days.get_loc(pd.Timestamp(out.loc[i, "Date"]))
     assert out["s1_YZ_20"].between(0, 1).all()                               # 섹터당 6종목(≥5) → 전부 값
     small = out.copy(); small.loc[small.Ticker == "000000", "sector_top"] = "ALONE"
-    out2 = F3.add_v3(small.drop(columns=["s1_YZ_20", "s1_YZ_60"]), market=mk, yz=yz)
+    out2 = F3.add_v3(small.drop(columns=["s1_YZ_20", "s1_YZ_60"]), market=mk, yz=yz, cal=cal)
     assert out2.loc[out2.sector_top == "ALONE", "s1_YZ_20"].isna().all()       # 1종목 섹터 → 빈칸
-    assert set(F3.SCOL) <= set(out.columns)
+    assert set(F3.SCOL) <= set(out.columns) and (out.cal_next == 1.0).all()
+
+
+def test_calendar_frame():
+    td = pd.to_datetime(["2026-09-22", "2026-09-23", "2026-09-28", "2026-09-29", "2026-10-02"])   # 추석 연휴 · 금
+    f = F3.calendar_frame(td, trading_days=td, next_fn=lambda t: pd.Timestamp("2026-10-06"))
+    assert f.cal_next.tolist() == [1, 5, 1, 3, 4]       # 9-23(수) → 9-28(월) 5일 · 10-02(금) → 10-06(화, 달력 함수)
+    assert np.isnan(f.cal_prev.iloc[0]) and f.cal_prev.tolist()[1:] == [1, 5, 1, 3]
+    g = F3.calendar_frame(td, trading_days=td, next_fn=lambda t: None)
+    assert np.isnan(g.cal_next.iloc[-1])                 # 달력에 없으면 빈칸
 
 
 def test_v3_profile():
     import run_daily as rd
-    assert rd.VARIANTS["v3"] == F3.__dict__.get("V3_KEY", "BG1MD") == rd.V3_KEY
+    assert rd.VARIANTS["v3"] == rd.V3_KEY == "BG1MDpc"
     prof = rd.resolve_profile(cfg.TARGET, "v3")
     assert prof["signal_dir"].endswith("signals_v3") and prof["variant"] == "v3"
     with pytest.raises(SystemExit):

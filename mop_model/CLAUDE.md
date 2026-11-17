@@ -42,9 +42,10 @@ XS/G1/G5 100개 피처가 `groupby("Date").rank(pct=True)` — 그날 유니버�
 **과거 전 구간 값이 바뀐다** → LLV parquet 의 종목단위 upsert 계약(`_upsert_and_recompute`, `SUPPLY_COLS` 보존)과
 정면충돌. 게다가 lightgbm/catboost 의존성이 LLV 를 import 하는 전 프로젝트로 번진다.
 
-## 그림자 v3 = 데이포트 2.0 후보 BG1MD (2026-11-17 케인)
+## 그림자 v3 = 데이포트 2.0 후보 BG1MDpc (2026-11-17 케인)
 
-`run_daily.py --variant v3` → `output/signals_v3` (SP 데이 그림자 R11, 저녁 체인 15단계). 97피처 = 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일 + 종목 드라이브 4.
+`run_daily.py --variant v3` → `output/signals_v3` (SP 데이 그림자 R11, 저녁 체인 15단계). 99피처 = 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일 + 휴장 달력 2(cal_next·cal_prev) + 종목 드라이브 4.
+신호일의 다음 거래일은 LLV `trading_calendar`(KIS 휴장일 캐시)로 채운다 — 캐시가 없으면 KIS 를 부르므로 미니에서만 돈다.
 정의 정본 = `src/features_v3.py` — cols.json·features.parquet 에는 없고 신호 때 메모리에서 붙인다(운영 v1·v2 무접촉).
 ⚠ 시장 10 은 `market_layer.judge` 를 신호 시점 자료(그날 브레드스 = 한국투자 잠정)로 계산한다. 테스트 `tests/test_mop_v3_variant.py`.
 

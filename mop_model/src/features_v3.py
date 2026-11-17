@@ -2,12 +2,15 @@
 """
 features_v3.py — 데이포트 그림자 v3 = 2.0 후보 BG1MD (케인 2026-11-17, 볼트 MagicFormula 데이포트 2.0 피처 사다리)
 
-구성 97개 = 정리 BASE 41 + 그 대섹터 안 순위(G1) 41 + 시장 10 + 요일 + 종목 드라이브 4
+구성 99개 = 정리 BASE 41 + 그 대섹터 안 순위(G1) 41 + 시장 10 + 요일 + 휴장 달력 2 + 종목 드라이브 4
+  (2026-11-17 17:29 케인 (가): 요일 몫의 대부분이 '휴장 건너기' 로 확인돼 BG1MD 97 → BG1MDpc 99 로 바꿨다)
   정리 BASE 41 = 운영 BASE 48 − {같은 값 중복: vol_ratio·energy_index / 거의 같은 값: smart_pressure·retail_pressure·hope_vector
                   / 미래 정보: vol_idx·wy_label·wy_phase / 기준점 문제: close_idx / 시장 단: dow} + vol_idx_c(인과) + YZ_20·YZ_60(LLV)
   시장 10 = ⑦·⑤ 판정 · 브레드스 값 · C2 · 관문 창 (MF market_layer.judge) · 직전 18밤 유니버스 갭 변동성 · 코스피200 드라이브 4
+  휴장 달력 2 = cal_next(다음 거래일까지 달력일) · cal_prev(직전 거래일로부터 달력일) — KRX 휴장일은 미리 공표되므로 신호 시점에 안다.
+                과거 = LLV 거래일(core 뷰 날짜), 신호일의 다음 거래일 = LLV trading_calendar(KIS 휴장일 정본 캐시).
   종목 드라이브 4 = 종가 기준 같은 부호 연속일의 길이·크기·속도·갭 몫
-정의 정본 = 연구 스크립트 SP reports/dayport2/e1_feature_ladder.py (BG1MD) — 그것과 같은 계산을 운영 경로에 옮긴 것이다.
+정의 정본 = 연구 스크립트 SP reports/dayport2/e1_feature_ladder.py (BG1MDpc) — 그것과 같은 계산을 운영 경로에 옮긴 것이다.
 
 운영 build_features 산출물(features.parquet·cols.json)은 건드리지 않는다 — 신호 때 메모리에서 붙인다(run_daily --variant v3).
 ⚠ 시장 판정은 신호 시점(19:10)의 자료로 계산한다 — 그날 브레드스는 한국투자 잠정치다. 연구(e1)는 KRX 확정치로 쟀다.
@@ -28,6 +31,7 @@ DROP_A = ["vol_ratio", "energy_index", "smart_pressure", "retail_pressure", "hop
 YZ = ["YZ_20", "YZ_60"]
 MCOL = ["m_p7", "m_p5", "m_breadth", "m_c2", "m_gate", "m_rv18", "m_drv_len", "m_drv_size", "m_drv_speed", "m_drv_gap"]
 SCOL = ["sdrv_len", "sdrv_size", "sdrv_speed", "sdrv_gap"]
+CAL = ["cal_next", "cal_prev"]
 _MF_ROOT = Path(__file__).resolve().parents[2]          # MagicFormula/
 
 
@@ -36,9 +40,9 @@ def base41(cols_all: dict) -> list:
 
 
 def v3_cols(cols_all: dict) -> list:
-    """BG1MD 97 — 순서 고정 (연구 e1 과 같다)."""
+    """BG1MDpc 99 — 순서 고정 (연구 e1 6단계 BG1MDpc 와 같다)."""
     b = base41(cols_all)
-    return b + ["s1_" + c for c in b] + MCOL + ["dow"] + SCOL
+    return b + ["s1_" + c for c in b] + MCOL + ["dow"] + CAL + SCOL
 
 
 def drive_cols(df: pd.DataFrame, key: str, o: str = "Open", c: str = "Close") -> pd.DataFrame:
@@ -91,8 +95,39 @@ def market_frame(as_of) -> pd.DataFrame:
     return mk
 
 
-def add_v3(d: pd.DataFrame, as_of=None, market: pd.DataFrame | None = None, yz: pd.DataFrame | None = None) -> pd.DataFrame:
-    """features 프레임(d)에 v3 전용 컬럼을 붙여 돌려준다 (원본 순서 유지). market·yz 를 주면 그걸 쓴다(테스트용)."""
+def _next_trading_day(t: pd.Timestamp) -> pd.Timestamp | None:
+    """LLV trading_calendar(KIS 휴장일 캐시)로 t 다음 거래일. 3주 안에 없으면 None."""
+    if str(cfg.LLV_PATH) not in sys.path:
+        sys.path.insert(0, str(cfg.LLV_PATH))
+    from stolab_data.trading_calendar import is_trading_day
+    for k in range(1, 22):
+        x = (t + pd.Timedelta(days=k)).date()
+        if is_trading_day(x):
+            return pd.Timestamp(x)
+    return None
+
+
+def calendar_frame(dates, trading_days=None, next_fn=None) -> pd.DataFrame:
+    """날짜 → cal_next·cal_prev (달력일). trading_days = 거래일 목록(기본 LLV core 뷰 날짜).
+    목록 마지막 날짜 이후의 '다음 거래일' 은 next_fn(기본 LLV trading_calendar)으로 채운다 — 신호일 당일용."""
+    if trading_days is None:
+        trading_days = pd.read_parquet(cfg.CORE, columns=["Date"]).Date.unique()
+    td = pd.DatetimeIndex(sorted(pd.to_datetime(trading_days).unique()))
+    nx = pd.Series(td[1:], index=td[:-1]); pv = pd.Series(td[:-1], index=td[1:])
+    if len(td):
+        n = (next_fn or _next_trading_day)(td[-1])
+        if n is not None:
+            nx.loc[td[-1]] = n
+    dd = pd.DatetimeIndex(sorted(pd.to_datetime(pd.Series(dates)).unique()))
+    out = pd.DataFrame(index=dd)
+    out["cal_next"] = (dd.to_series().map(nx) - dd.to_series()).dt.days.astype(float)
+    out["cal_prev"] = (dd.to_series() - dd.to_series().map(pv)).dt.days.astype(float)
+    return out
+
+
+def add_v3(d: pd.DataFrame, as_of=None, market: pd.DataFrame | None = None, yz: pd.DataFrame | None = None,
+           cal: pd.DataFrame | None = None) -> pd.DataFrame:
+    """features 프레임(d)에 v3 전용 컬럼을 붙여 돌려준다 (원본 순서 유지). market·yz·cal 을 주면 그걸 쓴다(테스트용)."""
     d = d.copy(); d["Date"] = pd.to_datetime(d.Date); d["Ticker"] = d.Ticker.astype(str).str.zfill(6)
     order = d.index
     if yz is None:
@@ -113,4 +148,8 @@ def add_v3(d: pd.DataFrame, as_of=None, market: pd.DataFrame | None = None, yz: 
     m = mk.reindex(d.Date.values)
     for c in MCOL:
         d[c] = m[c].to_numpy() if c in m.columns else np.nan
+    cf = cal if cal is not None else calendar_frame(d.Date.unique())
+    cv = cf.reindex(d.Date.values)
+    for c in CAL:
+        d[c] = cv[c].to_numpy()
     return d

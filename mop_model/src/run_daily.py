@@ -32,7 +32,7 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   output/signals_v2 에만 쓴다. 운영 output/signals 는 건드리지 않는다. 데이 그림자 R9 가 읽는다.
   python3 run_daily.py --variant v2      # (features 는 앞선 운영 --rebuild 가 만든 것을 재사용)
 
-★ 그림자 v3(--variant v3, 2026-11-17 케인 — 데이포트 2.0 후보 BG1MD 97): 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일
+★ 그림자 v3(--variant v3, 2026-11-17 케인 — 데이포트 2.0 후보 BG1MDpc 99): 정리 BASE 41 + 대섹터 순위 41 + 시장 10 + 요일 + 휴장 달력 2
   + 종목 드라이브 4. cols.json 에 없고 features_v3.add_v3 가 신호 때 메모리에서 붙인다. output/signals_v3 에만 쓴다. 데이 그림자 R11.
   python3 run_daily.py --variant v3
 
@@ -73,8 +73,8 @@ PROFILES = {
 
 
 # 피처 변형 — v1 = 운영 CHAMPION(148). v2 = 그림자(146), 데이포트 타깃 전용.
-# v3 = 데이포트 2.0 후보 BG1MD(97, 2026-11-17 케인) — cols.json 에 없고 features_v3 가 신호 때 메모리에서 붙인다.
-V3_KEY = "BG1MD"
+# v3 = 데이포트 2.0 후보 BG1MDpc(99, 2026-11-17 케인 — 요일 + 휴장 달력 2) — cols.json 에 없고 features_v3 가 신호 때 메모리에서 붙인다.
+V3_KEY = "BG1MDpc"
 VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2", "v3": V3_KEY}
 
 
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     ap.add_argument("--target", default=None, help="y_rel(기본, 데이포트) | y_intra(화이트포트)")
     ap.add_argument("--signal-dir", default=None, help="신호 JSON 디렉터리 (기본: 타깃별 프로필)")
     ap.add_argument("--variant", default="v1", choices=sorted(VARIANTS),
-                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2 | v3 = 2.0 후보 BG1MD(97) → output/signals_v3")
+                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2 | v3 = 2.0 후보 BG1MDpc(99) → output/signals_v3")
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과
