@@ -4,7 +4,7 @@
  "sources": "pykrx · KRX · 한국은행 ECOS",
  "files": {
   "ecos_rates.parquet": {
-   "rows": 26387,
+   "rows": 26397,
    "mb": 0.1,
    "columns": [
     "date",
@@ -13,8 +13,8 @@
     "rate"
    ],
    "start": "2000-01-04",
-   "end": "2026-11-16",
-   "n_dates": 6783
+   "end": "2026-11-18",
+   "n_dates": 6785
   },
   "kospi200_2000_2014.parquet": {
    "rows": 3709,
@@ -32,7 +32,7 @@
    "n_dates": 3709
   },
   "krx_indices.parquet": {
-   "rows": 69298,
+   "rows": 69538,
    "mb": 3.0,
    "columns": [
     "date",
@@ -47,8 +47,8 @@
     "code"
    ],
    "start": "2015-01-02",
-   "end": "2026-11-04",
-   "n_dates": 2905
+   "end": "2026-11-18",
+   "n_dates": 2915
   },
   "krx_sector_indices.parquet": {
    "rows": 249597,
@@ -82,5 +82,5 @@
    ]
   }
  },
- "manifest_updated": "2026-11-17 07:41"
+ "manifest_updated": "2026-11-18 19:19"
 }
