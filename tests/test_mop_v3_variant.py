@@ -98,3 +98,32 @@ def test_v3_profile():
     assert prof["signal_dir"].endswith("signals_v3") and prof["variant"] == "v3"
     with pytest.raises(SystemExit):
         rd.resolve_profile("y_intra", "v3")
+
+
+# ── v4 (2026-11-20 케인 — 데이포트 2.0 A3: v3 피처 + 목표 '그날 갭 상위 10%', 데이 그림자 R12) ──────────────
+def test_v4_profile_and_target():
+    import run_daily as rd
+    assert rd.VARIANTS["v4"] == rd.V3_KEY and rd.TRAIN_TARGET_OF == {"v4": "y_top10"}
+    prof = rd.resolve_profile(cfg.TARGET, "v4")
+    assert prof["signal_dir"].endswith("signals_v4") and prof["variant"] == "v4"
+    assert rd.resolve_profile(cfg.TARGET, "v3")["signal_dir"].endswith("signals_v3")      # v3 는 그대로
+    with pytest.raises(SystemExit):
+        rd.resolve_profile("y_intra", "v4")
+
+
+def test_add_top10_target():
+    rows = []
+    for dt in ("2026-11-02", "2026-11-03"):
+        for i in range(20):
+            rows.append(dict(Date=pd.Timestamp(dt), Ticker=f"{i:06d}", Gap_T1=(i - 10) / 100))
+    rows.append(dict(Date=pd.Timestamp("2026-11-04"), Ticker="000001", Gap_T1=np.nan))   # 라벨 미확정
+    d = pd.DataFrame(rows)
+    out = F3.add_top10_target(d.copy())
+    assert len(out) == len(d) and list(out.Ticker) == list(d.Ticker)                       # 행 수·순서 그대로
+    day = out[out.Date == "2026-11-02"]
+    assert day.y_top10.sum() == 2 and set(day[day.y_top10 == 1].Ticker) == {"000018", "000019"}   # 20종목 중 상위 10% = 2
+    assert np.isnan(out[out.Date == "2026-11-04"].y_top10).all()
+    # 갭 NaN 종목은 그날 순위에서 빠진다
+    d2 = d[d.Date == "2026-11-03"].copy(); d2.loc[d2.index[-1], "Gap_T1"] = np.nan
+    o2 = F3.add_top10_target(d2)
+    assert o2.y_top10.isna().sum() == 1 and o2.y_top10.sum() == 2      # 19종목 → 백분위 > 0.9 는 18·19위

@@ -36,6 +36,10 @@ run_daily.py — 운영: 오늘의 매수 신호 생성 → 신호 JSON 산출
   + 종목 드라이브 4. cols.json 에 없고 features_v3.add_v3 가 신호 때 메모리에서 붙인다. output/signals_v3 에만 쓴다. 데이 그림자 R11.
   python3 run_daily.py --variant v3
 
+★ 그림자 v4(--variant v4, 2026-11-20 케인 — 데이포트 2.0 A3): v3 피처(BG1MDpc 99) 그대로, 학습 목표만 '그날 갭 상위 10%'(y_top10).
+  output/signals_v4 에만 쓴다. 데이 그림자 R12(19:10 게이트 — 종가 이후 +0.3% 넘게 오르면 매수 포기)가 읽는다.
+  python3 run_daily.py --variant v4
+
 ★ 화이트포트(--target y_intra): 같은 features.parquet 에 intra.py 의 타깃·5피처를 얹어
   "익일 시가→종가가 그날 중앙값보다 큰가" 를 학습한다. 신호는 별도 디렉터리에만 쓴다 —
   데이포트 경로(output/signals)·기본 동작은 옵션을 안 주면 전과 같다.
@@ -75,7 +79,10 @@ PROFILES = {
 # 피처 변형 — v1 = 운영 CHAMPION(148). v2 = 그림자(146), 데이포트 타깃 전용.
 # v3 = 데이포트 2.0 후보 BG1MDpc(99, 2026-11-17 케인 — 요일 + 휴장 달력 2) — cols.json 에 없고 features_v3 가 신호 때 메모리에서 붙인다.
 V3_KEY = "BG1MDpc"
-VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2", "v3": V3_KEY}
+VARIANTS = {"v1": "CHAMPION", "v2": "CHAMPION_V2", "v3": V3_KEY, "v4": V3_KEY}
+# v4 = 2.0 후보 A3 (2026-11-20 케인 — 데이 그림자 R12): 피처는 v3(BG1MDpc 99) 그대로, 학습 목표만 그날 갭 상위 10% (features_v3.add_top10_target).
+#      신호 JSON 의 p 는 v3 와 같은 방식(그날 백분위)이라 R12 의 rank·p 컷을 그대로 쓴다.
+TRAIN_TARGET_OF = {"v4": "y_top10"}
 
 
 def resolve_profile(target=None, variant="v1"):
@@ -119,6 +126,8 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
         import features_v3 as F3
         d = F3.add_v3(d, as_of=today or d.Date.max())
         cols = F3.v3_cols(cols_all)
+        if prof["variant"] in TRAIN_TARGET_OF:
+            d = F3.add_top10_target(d)
     else:
         if prof["cols_key"] not in cols_all:
             raise SystemExit(f"cols.json 에 {prof['cols_key']} 없음 — build_features 재실행 필요 (--rebuild)")
@@ -140,7 +149,8 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
     if score_df.empty:
         raise SystemExit(f"{today.date()} 데이터 없음 — LLV 종가 배치 완료 여부 확인")
 
-    scores, meta = fit_predict(train, score_df, cols, target, use_ensemble, return_meta=True)
+    train_target = TRAIN_TARGET_OF.get(prof["variant"], target)   # v4 만 y_top10 — 나머지는 프로필 타깃 그대로
+    scores, meta = fit_predict(train, score_df, cols, train_target, use_ensemble, return_meta=True)
     score_df["p"] = scores.values
     score_df = score_df.sort_values("p", ascending=False).reset_index(drop=True)
     score_df["rank"] = np.arange(1, len(score_df) + 1)
@@ -160,7 +170,7 @@ def signal(today=None, use_ensemble=True, target=None, top_k=None,
         "schema_version": cfg.SCHEMA_VERSION,
         "strategy_id": prof["strategy_id"],
         "model_version": prof["model_version"],
-        "target": target,
+        "target": train_target,
         "variant": prof["variant"],
         "as_of": str(today.date()),
         "generated_at": datetime.now(KST).isoformat(timespec="seconds"),
@@ -202,7 +212,7 @@ if __name__ == "__main__":
     ap.add_argument("--target", default=None, help="y_rel(기본, 데이포트) | y_intra(화이트포트)")
     ap.add_argument("--signal-dir", default=None, help="신호 JSON 디렉터리 (기본: 타깃별 프로필)")
     ap.add_argument("--variant", default="v1", choices=sorted(VARIANTS),
-                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2 | v3 = 2.0 후보 BG1MDpc(99) → output/signals_v3")
+                    help="v1 = 운영 CHAMPION(기본) | v2 = 그림자 CHAMPION_V2 → output/signals_v2 | v3 = 2.0 후보 BG1MDpc(99) → output/signals_v3 | v4 = v3 피처 + 목표 상위 10%% (A3) → output/signals_v4")
     a = ap.parse_args()
 
     # 날짜 미지정(정규 배치)일 때만 휴장일 체크 — --date 지정은 테스트/재실행용이므로 통과

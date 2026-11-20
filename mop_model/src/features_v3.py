@@ -153,3 +153,17 @@ def add_v3(d: pd.DataFrame, as_of=None, market: pd.DataFrame | None = None, yz: 
     for c in CAL:
         d[c] = cv[c].to_numpy()
     return d
+
+
+# ── v4 (2026-11-20 케인 — 데이포트 2.0 A3: 피처 v3 그대로, 학습 목표만 '그날 갭 상위 10%') ─────────────
+TOP10_TARGET = "y_top10"
+TOP10_Q = 0.9
+
+
+def add_top10_target(d: pd.DataFrame, gap: str = "Gap_T1") -> pd.DataFrame:
+    """그날 안 다음 날 갭(Gap_T1) 백분위 > 0.9 → 1, 아니면 0. 갭이 없는 행(라벨 미확정·마지막 날)은 NaN.
+    순위는 그날 갭이 있는 종목끼리만 매긴다 (y_rel 과 같은 대상). 행 수·순서를 바꾸지 않는다.
+    SP reports/dayport2 e1 14~20단계(A3_top)와 같은 정의 — 개발 구간 결과의 재현 조건."""
+    pr = d.groupby("Date")[gap].rank(pct=True)
+    d[TOP10_TARGET] = (pr > TOP10_Q).astype(float).where(d[gap].notna())
+    return d
