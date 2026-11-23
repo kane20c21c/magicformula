@@ -5,6 +5,7 @@
     python3 scripts/jdh_signal.py              # 오늘 (거래일·시각 가드)
     python3 scripts/jdh_signal.py --force      # 가드 생략 (수동 확인용 — 장 마감 뒤엔 현재가 = 종가)
     python3 scripts/jdh_signal.py --dry-run    # 저장 없이 출력만
+    python3 scripts/jdh_signal.py --force --at 1510   # 오늘 지나간 시각의 1분봉 가격으로 판정 (놓친 날 재현)
 
 1) 오늘 적용 유니버스의 선행 3종목 (없으면 만든다 — 유니버스 조정 뒤 첫 실행에서 자가치유)
 2) 선행 3종목·KOSPI200 의 15:10 현재가(잠정) ÷ 5거래일 전 종가 → 5일 수익률 (완전 4일 + 잠정 1일)
@@ -44,6 +45,29 @@ def _llv():
         pass
     from stolab_data.trading_calendar import is_trading_day, get_recent_trading_days
     return is_trading_day, get_recent_trading_days
+
+
+def stock_at(t: str, hhmm: str) -> tuple[float | None, str]:
+    """오늘 hhmm 1분봉 종가 (KIS 분봉 — 당일 한정)."""
+    from stolab_data.data_service import get_price_at_time
+    try:
+        r = get_price_at_time(t, hhmm + "00")
+    except Exception as e:  # noqa: BLE001
+        return None, f"실패: {e}"
+    if not r or not r.get("Price"):
+        return None, "분봉 없음"
+    return float(r["Price"]), f"KIS 분봉 {r['Time'][:2]}:{r['Time'][2:4]}"
+
+
+def k200_at(hhmm: str) -> tuple[float | None, str]:
+    from stolab_data.data_service import get_index_price_at_time
+    try:
+        r = get_index_price_at_time("KOSPI200", hhmm + "00")
+    except Exception as e:  # noqa: BLE001
+        return None, f"실패: {e}"
+    if not r or not r.get("Price"):
+        return None, "분봉 없음"
+    return float(r["Price"]), f"KIS 분봉 {r['Time'][:2]}:{r['Time'][2:4]}"
 
 
 def stock_now(t: str) -> tuple[float | None, str]:
@@ -93,7 +117,13 @@ def recent_closes(tickers: list[str], days: list) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true"); ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--at", default=None, help="HHMM — 오늘 이 시각의 1분봉 가격으로 판정 (현재가 대신)")
     a = ap.parse_args()
+    at = None
+    if a.at:
+        at = a.at.replace(":", "")
+        if len(at) != 4 or not at.isdigit():
+            ap.error("--at 은 HHMM (예: 1510)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     is_td, recent_tds = _llv()
     now = datetime.now(KST); today = now.date()
@@ -109,12 +139,12 @@ def main() -> int:
     st_base, k_base, panel_last = base_closes(tk, base_day)
     leads = []
     for x in picks["leads"]:
-        px, src = stock_now(x["ticker"])
+        px, src = stock_at(x["ticker"], at) if at else stock_now(x["ticker"])
         leads.append({"ticker": x["ticker"], "name": x.get("name", ""), "base_close": st_base.get(x["ticker"]),
                       "now": px, "now_source": src})
-    kn, ksrc = k200_now()
+    kn, ksrc = k200_at(at) if at else k200_now()
     res = judge(today, leads, {"base_close": k_base, "now": kn, "now_source": ksrc}, latest_p7(today, prev))
-    res.update({"generated_at": now.isoformat(timespec="seconds"), "base_date": str(base_day),
+    res.update({"generated_at": now.isoformat(timespec="seconds"), "price_at": (f"{at[:2]}:{at[2:]}" if at else None), "base_date": str(base_day),
                 "complete_days": [str(d) for d in complete], "panel_last": panel_last, "panel_fresh": panel_last == str(prev[0]),
                 "picks": {"universe_effective": picks["universe_effective"], "window": picks.get("window"),
                           "leads": [{k: v for k, v in x.items() if k in ("ticker", "name", "bal_recent", "slope")} for x in picks["leads"]]},
