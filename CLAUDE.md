@@ -41,7 +41,7 @@
 
 ---
 
-## 룰 5개
+## 룰 6개
 
 | # | 룰 | 폴더 | 스펙 정본 | 성격 |
 |---|---|---|---|---|
@@ -50,6 +50,7 @@
 | 3 | **스윙 포트** | `swing/` (운영) · `korean_mkt_study/` (연구) | `swing/strategy_reference.py` + SP `app/paper/config.py` · 연구 기록 `korean_mkt_study/STRATEGY.md` | 눌림목 진입 |
 | 4 | **화이트 포트** | `mop_model/` (데이 포트와 공유) | SP `WHITEPORT_DESIGN.md` + `mop_model/src/intra.py` | 장중 드리프트 (ML, 낮) |
 | 5 | **반등 룰** | `bounce_rule/` | `bounce_rule/README.md` + `config.py` | 깊은 드라이브 뒤 강한 첫 반등 — **신호 전용** (2026-11-02) |
+| 6 | **장단현포트** | `jdh_rule/` | `jdh_rule/README.md` + `config.py` | ⑦ 로 롱/현금·롱/숏 틀 전환, KODEX 200·인버스 슬롯 이동 — 가상계좌 SP `app/jdh` (2026-11-23) |
 | — | ~~발열률~~ | → **SpotGauge** | `SpotGauge/CLAUDE.md` | 시장 관측기 (이관 중) |
 
 ### 1. 황금률 — `COMBINED-v3-2026-08` (2026-08-25~)
@@ -195,6 +196,16 @@ stop3: 일 +0.208 · Sharpe 2.20 · MDD −12.7 · 최악일 −3.2(저가 근�
 "매매 룰" 정의에 맞지 않는다. 그래서 별도 프로젝트로 나간다.
 **이 리포에서는 더 이상 발열률 로직을 손대지 않는다** — 스펙·파라미터 정본은
 `SpotGauge/CLAUDE.md`, 화면은 HomAlone `4_Temp.View`(경로 상수 `config.SPOTGAUGE_DIR`).
+
+---
+
+### 6. 장단현포트 — `v1.1.1.1` (2026-11-23 케인 확정)
+15:10 `scripts/jdh_signal.py` (plist `com.kane.magicformula-jdh-signal`) → `output/signals_jdh/YYYYMMDD.json` → SP 15:17 `jdh-trade` 체결.
+⑦ 보유 → 롱/현금 + KOSPI200 자기 5일 부호(±1) / ⑦ 현금 → 롱/숏 + 선행 3종목 5일 합의(3개 ±2 · 정확히 2개 ±1). 5일 = 완전 4일 + 15:10 잠정 1일.
+선행종목 = 유니버스 적용일마다 직전 240관측(10일 수익률 → 다음 날 KOSPI200, 40일×6구간 균형적중률, 기울기>0 상위 3) — `output/jdh/picks_{적용일}.json`.
+근거 = `korean_mkt_study/k200_regime_switch*.py` (2020Q1~2026Q3 분기 평균 +5.4% · 하락 분기 −0.5% · 연속 MDD −37%). 정본·한계 = `jdh_rule/README.md`.
+⚠ 선행종목 **단독**은 전진 검증에서 KOSPI200 자기추세를 못 이겼다 (11/27) — 하락 국면(롱/숏)에서만 쓴다.
+회귀: `tests/test_jdh_rule.py` (이동 규칙·틀·⑦ 낡음·10/11월 선정 연구 재현·연구 폴더 미참조).
 
 ---
 

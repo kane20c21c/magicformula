@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	  장단현포트(룰 #6) 15:10 잠정 판정 (케인 2026-11-23).
+	  선행 3종목·KOSPI200 의 15:10 현재가 ÷ 5거래일 전 종가(완전 4일 + 잠정 1일) + 전날 확정 ⑦ →
+	  output/signals_jdh/YYYYMMDD.json. StockPortfolio 15:17 jdh-trade 가 읽어 체결한다.
+	  섹터 게이지(mop-gauge)와 같은 15:10 이지만 따로 둔다 — 게이지가 ~3분 걸려 뒤에 붙이면 15:17 체결과 겹치고,
+	  어느 한쪽 실패가 다른 쪽을 막지 않게 하려는 것. 소요 수 초 (KIS 4콜 + 패널 읽기).
+	  휴장·시간대(15:05~15:19) 가드는 스크립트가 한다. 유니버스 조정 뒤 첫 실행에서 선행종목을 새로 고른다.
+	  ⚠ 인터프리터 /usr/local/bin/python3 — market-layer-confirm 과 같다.
+	-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.kane.magicformula-jdh-signal</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/StockPortfolio/scripts/infra/run_batch.sh</string>
+		<string>magicformula-jdh-signal</string>
+		<string>/usr/local/bin/python3</string>
+		<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/scripts/jdh_signal.py</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/jdh-signal.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula/output/jdh-signal.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>15</integer>
+		<key>Minute</key>
+		<integer>10</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/kaneyoun/DriveForALL/StoLab/MagicFormula</string>
+</dict>
+</plist>
